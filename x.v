@@ -6,10 +6,10 @@ endmodule
 
 module i2c_s(sda, scl);
 inout sda, scl;
-reg [7:0] i;
 reg rst;
 reg [7:0] dat;
-reg [7:0] dat_out;
+parameter N_DAT=4;
+reg [7:0] dat_out [N_DAT-1:0];
 reg sda_r, sda_l;
 reg ack;
 parameter ST_IDLE=3'b000;
@@ -18,15 +18,17 @@ parameter ST_READ=3'b010;
 parameter ST_WRTE=3'b011;
 reg [2:0] state;
 parameter MYADDR=(7'h3b);
-integer det;
+integer   i,j;
 
 	pin_drv sda_drv(sda, sda_r);
 
 	initial begin 
 		rst = 0;
-		det = 0;
 		sda_r = 1;
-		dat_out = 8'ha5;
+		for ( j=0; j<N_DAT; j = j + 1 ) begin
+			dat_out[j] = { 4'ha + j, 4'ha + j };
+		end
+		j     = 0;
 		state = ST_IDLE;
 	end
 
@@ -40,13 +42,11 @@ integer det;
 	// detect START
 	always @(negedge sda) begin
 		if ( scl != 0 ) begin
-			if ( state == ST_IDLE ) begin
-				state <= ST_ADDR;	
-				i     <= 0;
-			end else begin
-				$display("Unexpected state in START detector: %i\n", state);
-				rst <= 1;
-			end
+			state <= ST_ADDR;	
+			i     <= 0;
+			if ( state != ST_IDLE ) begin
+				$display("Start detector: RESTART from: %x\n", state);
+			end 
 		end
 	end
 
@@ -60,12 +60,14 @@ integer det;
 				ST_WRTE: if ( scl == 0 ) begin
 					i <= i+1;
 					if ( i < 7 ) begin
-						sda_r <= dat_out[6 - i];
+						sda_r <= dat_out[j][6 - i];
 					end else if ( i == 7 ) begin
 						sda_r <= 1'b1;
+						j     <= (j == N_DAT ? 0 : j + 1);
 					end else begin
-						if ( ack )
-							sda_r = dat_out[7];
+						if ( ack ) begin
+							sda_r = dat_out[j][7];
+						end
 						i <= 0;
 					end
 				end else begin
@@ -96,7 +98,7 @@ integer det;
 									state <= ST_READ;
 								end else begin
 									state <= ST_WRTE;
-									sda_r = dat_out[7];	
+									sda_r = dat_out[j][7];	
 								end
 							end
 							i <= 0;
@@ -201,23 +203,46 @@ integer det;
 `endif
 endmodule
 
-`define C_STRT   4'b0010
-`define C_STOP   4'b0001
-`define C_READ   4'b0100
-`define C_NACK   4'b1000
-`define C_STLY   4'b0000
+`ifdef COMM
 
-module i2c_m(bsy, clk, sda, scl, cmd_in, dat_in, ds, rst);
+`define CB_STRT 0
+`define CB_STOP 1
+`define CB_READ 2
+`define CB_WRTE 3
+`define CB_NACK 4
+
+`define C_STRT   (1<<`CB_STRT)
+`define C_STOP   (1<<`CB_STOP)
+`define C_READ   (1<<`CB_READ)
+`define C_WRTE   (1<<`CB_WRTE)
+`define C_NACK   (1<<`CB_NACK)
+`define C_CLRS   0
+
+`define SB_BSY 0
+`define SB_ERR 1
+`define SB_ALO 2
+`define SB_ACK 3
+
+`define S_BSY (1<<`SB_BSY)
+`define S_ERR (1<<`SB_ERR)
+`define S_ALO (1<<`SB_ALO)
+`define S_ACK (1<<`SB_ACK)
+
+`define C_SZ 5
+`define S_SZ 4
+
+module i2c_m(status, dat_out, clk, sda, scl, cmd_in, dat_in, ds, rst);
 parameter PER=2;
 parameter SDA_PER=1;
 input clk;
 inout sda;
 inout scl;
 input [7:0]dat_in;
-input [3:0]cmd_in;
+input [`C_SZ-1:0]cmd_in;
 input ds;
 input rst;
-output bsy;
+output [`S_SZ-1:0]status;
+output [7:0] dat_out;
 
 parameter W_NONE=2'b00;
 parameter W_CLKH=2'b01;
@@ -235,10 +260,17 @@ reg [31:0] div;
 reg [3:0]  i;
 reg sda_r, scl_r;
 reg [8:0]  dat;
-reg        bsy;
-reg        alo;
+reg        started;
+reg [`S_SZ-1:0]  status;
+parameter  GST_IDLE=2'b00;
+parameter  GST_STRT=2'b01;
+parameter  GST_READ=2'b10;
+parameter  GST_WRTE=2'b11;
+reg [1:0]  gstat;
 
-reg [3:0]  cmd;
+reg [`C_SZ-1:0]  cmd;
+
+wire dat_out = dat[8:1];
 
 	pin_drv sda_pin(sda, sda_r);
 	pin_drv scl_pin(scl, scl_r);
@@ -250,32 +282,63 @@ reg [3:0]  cmd;
 			div   <= 0;
 			sda_r <= 1;
 			scl_r <= 1;
-			alo   <= 0;
-
-			bsy   <= 0;
-		end else if ( ! bsy && ds ) begin
-			/* If no start then set state to ST_BITW/ST_BITR */
-			/* LSB is ACK bit and must be set when writing */
-			/* all bits must be set (in dat) when reading */
-			bsy    <= 1;
-			div    <= PER;
-			if ( (cmd_in & `C_READ) == 0 ) begin
-				dat    <= {dat_in, 1'b1};
-				state  <= ST_BITW;
+			status<= 0;
+			gstat <= GST_IDLE;
+		end else if ( ! status[`SB_BSY] && ds ) begin
+			if ( cmd_in == `C_CLRS ) begin
+				/* clear status */
+				status <= 0;
 			end else begin
-				dat    <= { 8'hff, ((cmd_in & `C_NACK) ? 1'b1 : 1'b0) };
-				state  <= ST_BITR;
+				/* If no start then set state to ST_BITW/ST_BITR */
+				/* LSB is ACK bit and must be set when writing */
+				/* all bits must be set (in dat) when reading */
+				/* sanity checks
+					- must START if we are currently idle
+					- cannot READ while WRITing and vice versa -- unless restart
+					- cannot READ and WRITE simultaneously
+					- cannot READ just after START (must address)
+				 */
+				if ( ( ! cmd_in[`CB_STRT] && (
+						gstat == GST_IDLE
+					 || (gstat == GST_WRTE && cmd_in[`CB_READ])
+					 || (gstat == GST_READ && cmd_in[`CB_WRTE])
+					 ) )
+					 || (cmd_in[`CB_READ] && cmd_in[`CB_WRTE])
+					 || ((cmd_in[`CB_STRT] || gstat == GST_STRT) && cmd_in[`CB_READ])
+				   ) begin
+					status <= `S_ERR;
+				end else begin
+					status <= `S_BSY;
+					div    <= PER;
+					if ( cmd_in[`CB_WRTE] ) begin
+						dat    <= {dat_in, 1'b1};
+						state  <= ST_BITW;
+					end else if ( cmd_in[`CB_READ] ) begin
+						dat    <= { 8'hff, cmd_in[`CB_NACK] };
+						state  <= ST_BITR;
+					end
+					if ( cmd_in[`CB_STRT] ) begin
+						gstat  <= GST_STRT; /* must send address */
+						state  <= ST_STRT;
+						if ( gstat != GST_IDLE ) begin
+							/* restart */
+							scl_r  <= 1;
+							wai    <= W_CLKH;
+						end else begin
+							sda_r  <= 0;
+						end
+					end else if ( (cmd_in & ~`C_NACK) == `C_STOP ) begin
+						/* only STOP */
+						state  <= ST_STOP;
+						sda_r  <= 0;
+					end
+					if ( cmd_in[`CB_WRTE] && (cmd_in[`CB_STRT] || gstat == GST_STRT) ) begin
+						gstat <= dat_in[0] ? GST_READ : GST_WRTE;
+					end
+					cmd    <= cmd_in;
+					i      <= 8;
+				end
 			end
-			if ( (cmd_in & `C_STRT) != 0 ) begin
-				state  <= ST_STRT;
-				sda_r  <= 0;
-			end else if ( cmd_in == `C_STLY ) begin
-				/* only STOP */
-				state  <= ST_STOP;
-				sda_r  <= 0;
-			end
-			cmd    <= cmd_in;
-			i      <= 8;
 		end else begin
 
 			case ( wai )
@@ -284,11 +347,12 @@ reg [3:0]  cmd;
 						wai <= W_NONE;
 						if ( sda_r && !sda && state != ST_BITR ) begin
 							$display("Arbitration lost\n");
-							alo   <= 1;
+							/* this clears the busy flag also */
+							status <= (`S_ERR | `S_ALO);
 							/* arbitration lost */
 							/* sda_r and scl_r are both 1 at this point */
 							state <= ST_IDLE;
-							bsy   <= 0;
+							gstat <= GST_IDLE;
 						end else begin
 							if ( state == ST_BITW || state == ST_BITR ) begin
 								if ( i > 0 ) begin
@@ -299,6 +363,9 @@ reg [3:0]  cmd;
 								if ( state == ST_BITR ) begin
 									dat[i] <= sda;
 								end
+							end else if ( state == ST_STRT ) begin
+								/* restart - now that scl is high we may pull sda low */
+								sda_r = 0;
 							end
 						end
 					end
@@ -321,14 +388,15 @@ reg [3:0]  cmd;
 
 							ST_DONE: begin
 								/* If we should generate stop */	
-								if ( (cmd & `C_STOP) ) begin
+								if ( cmd[`CB_STOP] ) begin
 									sda_r <= 0;
 									state <= ST_STOP;
 									div   <= PER;
 								end else begin
 									sda_r <= 1;
 									state <= ST_IDLE;
-									bsy   <= 0;
+									status[`SB_BSY] <= 0;
+									status[`SB_ACK] <= ~dat[0];
 								end
 							end
 
@@ -346,7 +414,12 @@ reg [3:0]  cmd;
 									scl_r <= 0;
 									wai   <= W_CLKL;
 									div   <= PER;
-									state <= ((cmd & `C_READ) == 0 ) ? ST_BITW : ST_BITR;
+									if ( cmd[`CB_WRTE] )
+										state <= ST_BITW;
+									else if ( cmd[`CB_READ] )
+										state <= ST_BITR;
+									else
+										state <= ST_DONE;
 								end
 
 								ST_BITR, ST_BITW:
@@ -373,7 +446,9 @@ reg [3:0]  cmd;
 										div   <= SDA_PER;
 										wai   <= W_CLKH; /* delay a little bit and check SDA */
 										state <= ST_IDLE;
-										bsy   <= 0;
+										gstat <= GST_IDLE;
+										status[`SB_BSY] <= 0;
+										status[`SB_ACK] <= ~dat[0];
 									end
 								end
 
@@ -387,16 +462,38 @@ reg [3:0]  cmd;
 	end
 endmodule
 
+`endif
+
 module test;
+
 	tri1 sda, scl;
-	reg  clk, rst, ds;
+	reg  clk, rst, ws;
 	reg  [7:0] dat;
-	reg  [3:0] cmd;
-	wire       bsy;
+	reg  [`C_SZ-1:0] cmd;
+	wire [`S_SZ-1:0] status;
+
+	wire mst_scl_out, mst_sda_out;
+
+task sync;
+	begin
+		#2 ws = 1;
+		#2 ws = 0;
+		if ( ! status[`SB_ERR] ) begin
+			@(negedge status[`SB_BSY]);
+		end
+		if ( status[`SB_ERR] ) begin
+			cmd = `C_CLRS;
+			#2 ws = 1;
+			#2 ws = 0;
+		end
+	end
+endtask
 
 	i2c_s slv(sda, scl);
-//	pin_drv clkdrv(scl, clk);
-	i2c_m mst(bsy, clk, sda, scl, cmd, dat, ds, rst);
+
+	pin_drv mst_sda_drv(sda, mst_sda_out);
+	pin_drv mst_scl_drv(scl, mst_scl_out);
+    i2c_m mst(clk, sda, mst_sda_out, scl, mst_scl_out, cmd, status, dat, /* dat_out */, ws, rst);
 
 	always #1 clk=~clk;
 
@@ -408,29 +505,26 @@ module test;
 		dat = 8'h5a;
 		cmd = `C_STRT | `C_STOP;
 		#1 rst = 0;
-		#2 ds  = 1;
-		#2 ds  = 0;
-		@(negedge bsy);
-		dat = (7'h3b << 1) | 1'b1;
+		sync;
+
 		cmd = `C_STRT;
-		#2 ds  = 1;
-		#2 ds  = 0;
-		@(negedge bsy);
+		sync;
+
+		dat = (7'h3b << 1) | 1'b1;
+		cmd = `C_STRT | `C_WRTE;
+		sync;
 
 		cmd = `C_READ;
-		#2 ds  = 1;
-		#2 ds  = 0;
-		@(negedge bsy);
+		sync;
 
 		cmd = `C_READ | `C_NACK;
-		#2 ds  = 1;
-		#2 ds  = 0;
-		@(negedge bsy);
+		sync;
 
-		cmd = `C_STLY;
-		#2 ds  = 1;
-		#2 ds  = 0;
-		@(negedge bsy);
+		cmd = `C_WRTE;
+		sync;
+
+		cmd = `C_STOP;
+		sync;
 				
 		#200;
 		$finish;
