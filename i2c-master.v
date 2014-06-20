@@ -25,17 +25,29 @@
 `define S_SZ 4
 
 module i2c_master(clk, sda, sda_out, scl, scl_out, cmd, stat_out, dat, dat_out, ws, rst);
-parameter PER=2;
-parameter SDA_PER=1;
-input clk;
-inout sda;
-inout scl;
-input [7:0]dat;
-input [`C_SZ-1:0]cmd;
-input ws;
-input rst;
-output [`S_SZ-1:0]stat_out = status;
-output [7:0]      dat_out  = dat_r[8:1];
+/* Timing given for standard/fast mode */
+parameter PER_HI=2;      /* SCL period HI 4.0us/0.6us */
+parameter PER_LO=2;      /* SCL period LO 4.7us/1.3us */
+parameter PER_SU_STOP=2; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
+parameter PER_SU_DATA=2; /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
+parameter PER_SU_RSRT=2; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
+parameter PER_HD_STRT=2; /* hold time for (RE)START: SDA fall  -> SCL fall              */
+parameter PER_TBUF=2;    /* Bus free time between STOP and new START 4.7us/1.3us        */
+parameter SDA_PER=1;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
+                         /* SDA raise -> SDA sample. Must be < PER_TBUF! */
+parameter PER_LD_SIZE=4;
+
+input  clk;
+input  sda;
+output sda_out;
+input  scl;
+output scl_out;
+input  [`C_SZ-1:0]cmd;
+output [`S_SZ-1:0]stat_out;
+input  [7:0]      dat;
+output [7:0]      dat_out;
+input             ws;
+input             rst;
 
 parameter W_NONE=2'b00;
 parameter W_CLKH=2'b01;
@@ -48,8 +60,10 @@ parameter ST_BITW=3'b011;
 parameter ST_STRT=3'b100;
 parameter ST_STOP=3'b101;
 parameter ST_DONE=3'b110;
+parameter ST_SCHK=3'b111;
 reg [2:0]  state;
-reg [31:0] div;
+reg [PER_LD_SIZE-1:0] div;
+reg [PER_LD_SIZE-1:0] dely;
 reg [3:0]  i;
 reg sda_r, scl_r;
 reg [8:0]  dat_r;
@@ -62,6 +76,38 @@ parameter  GST_WRTE=2'b11;
 reg [1:0]  gstat;
 
 reg [`C_SZ-1:0]  cmd_r;
+
+wire [`S_SZ-1:0]stat_out = status;
+wire [7:0]      dat_out  = dat_r[8:1];
+wire            sda_out  = sda_r;
+wire            scl_out  = scl_r;
+
+	task arbitration_lost;
+	begin
+		$display("Arbitration lost\n");
+		/* this clears the busy flag also */
+		status <= (`S_ERR | `S_ALO);
+		/* arbitration lost */
+		/* sda_r and scl_r are both 1 at this point */
+		state <= ST_IDLE;
+		gstat <= GST_IDLE;
+	end
+	endtask
+
+	always @(posedge sda or posedge rst) begin
+		if ( rst ) begin
+			dely <= 1;
+		end else if ( scl ) begin
+			// STOP condition detected; start dely timer
+			dely <= PER_TBUF;
+		end
+	end
+
+	always @(posedge clk) begin
+		/* dely == 1 means no further delay */
+		if ( dely > 1 )
+			dely = dely - 1;
+	end
 
 	always @(posedge clk or posedge rst) begin
 		if ( rst != 0 ) begin
@@ -97,7 +143,7 @@ reg [`C_SZ-1:0]  cmd_r;
 					status <= `S_ERR;
 				end else begin
 					status <= `S_BSY;
-					div    <= PER;
+					div    <= dely > PER_SU_DATA ? dely : PER_SU_DATA;
 					if ( cmd[`CB_WRTE] ) begin
 						dat_r  <= {dat, 1'b1};
 						state  <= ST_BITW;
@@ -112,11 +158,14 @@ reg [`C_SZ-1:0]  cmd_r;
 							/* restart */
 							scl_r  <= 1;
 							wai    <= W_CLKH;
+							div    <= PER_SU_RSRT;
 						end else begin
-							sda_r  <= 0;
+							/* new START; must delay for remaining tbuf time */
+							div    <= dely;
 						end
-					end else if ( (cmd& ~`C_NACK) == `C_STOP ) begin
+					end else if ( (cmd & ~`C_NACK) == `C_STOP ) begin
 						/* only STOP */
+						div    <= PER_SU_DATA; /* not entirely clear... */
 						state  <= ST_STOP;
 						sda_r  <= 0;
 					end
@@ -134,13 +183,7 @@ reg [`C_SZ-1:0]  cmd_r;
 					if ( scl == 1 ) begin
 						wai <= W_NONE;
 						if ( sda_r && !sda && state != ST_BITR ) begin
-							$display("Arbitration lost\n");
-							/* this clears the busy flag also */
-							status <= (`S_ERR | `S_ALO);
-							/* arbitration lost */
-							/* sda_r and scl_r are both 1 at this point */
-							state <= ST_IDLE;
-							gstat <= GST_IDLE;
+							arbitration_lost;
 						end else begin
 							if ( state == ST_BITW || state == ST_BITR ) begin
 								if ( i > 0 ) begin
@@ -151,9 +194,6 @@ reg [`C_SZ-1:0]  cmd_r;
 								if ( state == ST_BITR ) begin
 									dat_r[i] <= sda;
 								end
-							end else if ( state == ST_STRT ) begin
-								/* restart - now that scl is high we may pull sda low */
-								sda_r = 0;
 							end
 						end
 					end
@@ -179,12 +219,16 @@ reg [`C_SZ-1:0]  cmd_r;
 								if ( cmd_r[`CB_STOP] ) begin
 									sda_r <= 0;
 									state <= ST_STOP;
-									div   <= PER;
+									div   <= PER_LO;
 								end else begin
-									sda_r <= 1;
-									state <= ST_IDLE;
+									sda_r           <= 1;
+									state           <= ST_IDLE;
 									status[`SB_BSY] <= 0;
 									status[`SB_ACK] <= ~dat_r[0];
+									/* Start dely timer -- next time we may have to wait until
+									 * next cycle can be accepted 
+									 */
+									dely            <= PER_LO;
 								end
 							end
 
@@ -199,22 +243,33 @@ reg [`C_SZ-1:0]  cmd_r;
 							case ( state )
 								ST_STRT:
 								begin
-									scl_r <= 0;
-									wai   <= W_CLKL;
-									div   <= PER;
-									if ( cmd_r[`CB_WRTE] )
-										state <= ST_BITW;
-									else if ( cmd_r[`CB_READ] )
-										state <= ST_BITR;
-									else
-										state <= ST_DONE;
+									if ( sda_r ) begin
+										/* pull SDA low and wait for the hold period */
+										sda_r <= 0;
+										div   <= PER_HD_STRT;
+									end else begin
+										scl_r <= 0;
+										wai   <= W_CLKL;
+										div   <= PER_LO;
+										if ( cmd_r[`CB_WRTE] )
+											state <= ST_BITW;
+										else if ( cmd_r[`CB_READ] )
+											state <= ST_BITR;
+										else
+											state <= ST_DONE;
+									end
 								end
 
 								ST_BITR, ST_BITW:
 								begin
+									if ( scl_r ) begin
+										wai   <= W_CLKL;
+										div   <= PER_LO;
+									end else begin
+										wai   <= W_CLKH;
+										div   <= PER_HI;
+									end
 									scl_r <= ~scl_r;
-									div   <= PER;
-									wai   <= scl_r ? W_CLKL : W_CLKH;
 								end
 
 								ST_DONE:
@@ -228,17 +283,25 @@ reg [`C_SZ-1:0]  cmd_r;
 									if ( scl_r == 0 ) begin
 										scl_r <= 1;
 										wai   <= W_CLKH;
-										div   <= PER;
+										div   <= PER_SU_STOP;
 									end else begin
 										sda_r <= 1;
 										div   <= SDA_PER;
-										wai   <= W_CLKH; /* delay a little bit and check SDA */
-										state <= ST_IDLE;
-										gstat <= GST_IDLE;
+										state <= ST_SCHK;
+									end
+								end
+
+								ST_SCHK:
+									/* Check if stop condition persists */
+									if ( sda_r && ! sda ) begin
+										/* scl_r and sda_r are high at this point */
+										arbitration_lost;
+									end else begin
+										state           <= ST_IDLE;
+										gstat           <= GST_IDLE;
 										status[`SB_BSY] <= 0;
 										status[`SB_ACK] <= ~dat_r[0];
 									end
-								end
 
 								default:
 									;
