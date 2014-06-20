@@ -26,16 +26,17 @@
 
 module i2c_master(clk, sda, sda_out, scl, scl_out, cmd, stat_out, dat, dat_out, ws, rst);
 /* Timing given for standard/fast mode */
-parameter PER_HI=2;      /* SCL period HI 4.0us/0.6us */
-parameter PER_LO=2;      /* SCL period LO 4.7us/1.3us */
-parameter PER_SU_STOP=2; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
-parameter PER_SU_DATA=2; /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
-parameter PER_SU_RSRT=2; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
-parameter PER_HD_STRT=2; /* hold time for (RE)START: SDA fall  -> SCL fall              */
-parameter PER_TBUF=2;    /* Bus free time between STOP and new START 4.7us/1.3us        */
-parameter SDA_PER=1;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
-                         /* SDA raise -> SDA sample. Must be < PER_TBUF! */
-parameter PER_LD_SIZE=4;
+parameter PER_HI=40;      /* SCL period HI 4.0us/0.6us */
+parameter PER_LO=47;      /* SCL period LO 4.7us/1.3us */
+parameter PER_SU_STOP=40; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
+parameter PER_SU_DATA=3;  /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
+parameter PER_SU_RSRT=47; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
+parameter PER_HD_STRT=40; /* hold time for (RE)START: SDA fall  -> SCL fall   4.0us/0.6us */
+parameter PER_HD_DATA=0;  /* hold time for data       SCL fall  -> SDA change 0us/0us (300ns internal)  but we wait for CLKL so should be OK */
+parameter PER_TBUF=47;    /* Bus free time between STOP and new START 4.7us/1.3us         */
+parameter SDA_PER=10;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
+                          /* SDA raise -> SDA sample. Must be < PER_TBUF! */
+parameter PER_LD_SIZE=6;
 
 input  clk;
 input  sda;
@@ -55,6 +56,7 @@ parameter W_CLKL=2'b10;
 reg [1:0]  wai;
 
 parameter ST_IDLE=3'b000;
+parameter ST_INIT=3'b001;
 parameter ST_BITR=3'b010;
 parameter ST_BITW=3'b011;
 parameter ST_STRT=3'b100;
@@ -106,17 +108,23 @@ wire            scl_out  = scl_r;
 	always @(posedge clk) begin
 		/* dely == 1 means no further delay */
 		if ( dely > 1 )
-			dely = dely - 1;
+			dely <= dely - 1;
 	end
+
+`ifdef TEST_WITHOUTH_DELAY_TIMER
+	always @(dely) begin
+		dely <= 1;
+	end
+`endif
 
 	always @(posedge clk or posedge rst) begin
 		if ( rst != 0 ) begin
-			state <= ST_IDLE;
+			state <= ST_INIT;
 			wai   <= W_NONE;
-			div   <= 0;
+			div   <= PER_TBUF;
 			sda_r <= 1;
 			scl_r <= 1;
-			status<= 0;
+			status<= `S_BSY;
 			gstat <= GST_IDLE;
 		end else if ( ! status[`SB_BSY] && ws ) begin
 			if ( cmd == `C_CLRS ) begin
@@ -154,20 +162,24 @@ wire            scl_out  = scl_r;
 					if ( cmd[`CB_STRT] ) begin
 						gstat  <= GST_STRT; /* must send address */
 						state  <= ST_STRT;
-						if ( gstat != GST_IDLE ) begin
-							/* restart */
-							scl_r  <= 1;
-							wai    <= W_CLKH;
-							div    <= PER_SU_RSRT;
-						end else begin
-							/* new START; must delay for remaining tbuf time */
-							div    <= dely;
-						end
+						/* must delay for remaining tbuf (new start) or clock low (restart) time */
+						div    <= dely;
 					end else if ( (cmd & ~`C_NACK) == `C_STOP ) begin
 						/* only STOP */
-						div    <= PER_SU_DATA; /* not entirely clear... */
 						state  <= ST_STOP;
 						sda_r  <= 0;
+					end else begin
+						/* set wai <= W_CLKL so that the first data bit
+						 * is pushed onto SDA if state == ST_WRTE.
+						 * In all other cases it doesn't matter:
+						 *  - if ST_READ -> a 1 is shifted out since dat is filled with ones
+						 *  - the only other state in case(wai) below is ST_DONE which
+						 *    is not used here.
+						 *  - finally, for RESTART, we set wai <= W_CLKH; below
+						 * The only critical case (START) where we must not wait for CLKL
+						 * is avoided in this 'else' branch.
+						 */
+						wai    <= W_CLKL;
 					end
 					if ( cmd[`CB_WRTE] && (cmd[`CB_STRT] || gstat == GST_STRT) ) begin
 						gstat <= dat[0] ? GST_READ : GST_WRTE;
@@ -243,20 +255,27 @@ wire            scl_out  = scl_r;
 							case ( state )
 								ST_STRT:
 								begin
-									if ( sda_r ) begin
-										/* pull SDA low and wait for the hold period */
-										sda_r <= 0;
-										div   <= PER_HD_STRT;
+									if ( scl == 0 ) begin
+										/* restart */
+										scl_r  <= 1;
+										wai    <= W_CLKH;
+										div    <= PER_SU_RSRT;
 									end else begin
-										scl_r <= 0;
-										wai   <= W_CLKL;
-										div   <= PER_LO;
-										if ( cmd_r[`CB_WRTE] )
-											state <= ST_BITW;
-										else if ( cmd_r[`CB_READ] )
-											state <= ST_BITR;
-										else
-											state <= ST_DONE;
+										if ( sda_r ) begin
+											/* pull SDA low and wait for the hold period */
+											sda_r <= 0;
+											div   <= PER_HD_STRT;
+										end else begin
+											scl_r <= 0;
+											wai   <= W_CLKL;
+											div   <= PER_LO;
+											if ( cmd_r[`CB_WRTE] )
+												state <= ST_BITW;
+											else if ( cmd_r[`CB_READ] )
+												state <= ST_BITR;
+											else
+												state <= ST_DONE;
+										end
 									end
 								end
 
@@ -303,6 +322,13 @@ wire            scl_out  = scl_r;
 										status[`SB_ACK] <= ~dat_r[0];
 									end
 
+								ST_INIT:
+									begin
+										/* initial settling time expired; ready to go */
+										state           <= ST_IDLE;
+										status[`SB_BSY] <= 0;
+									end
+
 								default:
 									;
 							endcase
@@ -311,4 +337,83 @@ wire            scl_out  = scl_r;
 			endcase
 		end
 	end
+specify
+	/* hold time for start condition */
+	$hold(negedge sda, negedge scl, PER_HD_STRT);  // tHD;STA
+	$width(negedge scl, PER_LO);                   // tLOW
+	$hold(negedge scl, sda, PER_HD_DATA);          // tHD;DAT
+	$setup(sda, posedge scl, PER_SU_DATA);         // tSU;DAT
+	$width(posedge scl, PER_HI);                   // tHIGH
+	$setup(posedge scl, negedge sda, PER_SU_RSRT); // tSU;STA
+	$setup(posedge scl, posedge sda, PER_SU_STOP); // tSU;STO
+endspecify
+/* seems that icarus does not implement the above checks but ignores them */
+`ifdef  CHECK_TIMING
+	check_EE tHD_STA(rst, !sda, !scl, PER_HD_STRT);
+	check_EE tLOW   (rst, !scl,  scl, PER_LO);
+	check_EL tHD_DAT(rst, !scl,  sda, PER_HD_DATA);
+	check_LE tSU_DAT(rst,  scl,  scl, PER_SU_DATA);
+	check_EE tHI    (rst,  scl, !scl, PER_HI);
+	check_EE tSU_STA(rst,  scl, !sda, PER_SU_RSRT);
+	check_EE tSU_STO(rst,  scl,  sda, PER_SU_STOP);
+	check_SS tBUF   (rst,  scl,  sda, PER_TBUF);
+`endif
 endmodule
+
+`ifdef  CHECK_TIMING
+`define CHECK_MOD(nm,e1,e2) \
+	module nm(rst, s1, s2, lim); \
+		input           rst; \
+		input           s1, s2;  \
+		input [63:0]    lim; \
+		time            a,b;  \
+		initial         a = 0; \
+		reg            vio;  \
+		initial        vio = 0; \
+		reg            ini;    \
+		initial        ini = 1; \
+		always @(negedge rst) ini <= 0; \
+		always @(posedge rst) begin \
+			ini <= 1; \
+			vio <= 0; \
+		end \
+		always @(vio) if ( vio ) #2 vio <= 0; \
+		always @(e1 s1) a <= $time; \
+		always @(e2 s2) begin \
+			b = $time; \
+			if ( b - a < lim && !ini ) begin \
+				$display("Timing violation %t @%t\n", b-a, b); \
+				vio <= 1; \
+			end \
+		end \
+	endmodule
+
+`CHECK_MOD(check_EE, posedge, posedge)
+`CHECK_MOD(check_EL, posedge,        )
+`CHECK_MOD(check_LE,        , posedge)
+`CHECK_MOD(check_LL,        ,        )
+
+/* measure bus-free time */
+module check_SS(rst, scl, sda, lim);
+	input rst, scl, sda;
+	input [63:0] lim;
+
+	time a,b;
+	
+	always @(posedge rst or posedge sda) begin
+		if ( scl ) begin
+			// STOP
+			a     <= $time;
+		end
+	end
+
+	always @(negedge sda) begin
+		if ( scl ) begin
+			b = $time;
+			if (  b - a < lim ) begin
+				$display("TBUF Timing violation %t @%t\n", b-a, b); 
+			end
+		end
+	end
+endmodule
+`endif
