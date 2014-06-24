@@ -1,57 +1,71 @@
+/* Command bit positions */
 `define CB_STRT 0
 `define CB_STOP 1
 `define CB_READ 2
 `define CB_WRTE 3
 `define CB_NACK 4
 
-`define C_STRT   (1<<`CB_STRT)
-`define C_STOP   (1<<`CB_STOP)
-`define C_READ   (1<<`CB_READ)
-`define C_WRTE   (1<<`CB_WRTE)
-`define C_NACK   (1<<`CB_NACK)
+/* Command bits                */
+`define C_STRT   (1<<`CB_STRT) /* Issue START condition (prior to optional data xfer) */
+`define C_STOP   (1<<`CB_STOP) /* Issue STOP  condition (after optional data xfer )   */
+`define C_READ   (1<<`CB_READ) /* Read 1 byte                                         */
+`define C_WRTE   (1<<`CB_WRTE) /* Write 1 byte                                        */
+`define C_NACK   (1<<`CB_NACK) /* Do not send ACK after reading byte                  */
+/* C_CLRS clear latched status */ 
 `define C_CLRS   0
 
-`define SB_BSY 0
+/* Status bit positions        */
+`define SB_DON 0
 `define SB_ERR 1
 `define SB_ALO 2
-`define SB_ACK 3
+`define SB_BBL 3
+`define SB_ACK 4
+`define SB_BSY 5
+`define SB_BBY 6  
 
-`define S_BSY (1<<`SB_BSY)
-`define S_ERR (1<<`SB_ERR)
-`define S_ALO (1<<`SB_ALO)
-`define S_ACK (1<<`SB_ACK)
+/* Status bits                 */
+`define S_DON (1<<`SB_DON)     /* Command done                                        */
+`define S_ERR (1<<`SB_ERR)     /* Error (latched) can be further qualified (ALO/BBL)  */
+`define S_ALO (1<<`SB_ALO)     /* Arbitration lost (in addition to ERR)               */
+`define S_BBL (1<<`SB_BBL)     /* Bus busy (latched); ERR if bus owned by other master*/
+`define S_ACK (1<<`SB_ACK)     /* Received ACK (after WRTE)                           */
+`define S_BSY (1<<`SB_BSY)     /* Controller busy (not latched)                       */
+`define S_BBY (1<<`SB_BBY)     /* Bus busy (not latched)                              */
 
 `define C_SZ 5
-`define S_SZ 4
+`define S_SZ 7
 
 module i2c_master(clk, sda, sda_out, scl, scl_out, cmd, stat_out, dat, dat_out, ws, rst);
 /* Timing given for standard/fast mode */
-parameter US=1;              /* How many cycles per microsecond */
-parameter PER_HI=40*US;      /* SCL period HI 4.0us/0.6us       */
-parameter PER_LO=47*US;      /* SCL period LO 4.7us/1.3us       */
-parameter PER_SU_STOP=40*US; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
-parameter PER_SU_DATA=3*US;  /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
-parameter PER_SU_RSRT=47*US; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
-parameter PER_HD_STRT=40*US; /* hold time for (RE)START: SDA fall  -> SCL fall   4.0us/0.6us */
-parameter PER_HD_DATA=0*US;  /* hold time for data       SCL fall  -> SDA change 0us/0us (300ns internal)  but we wait for CLKL so should be OK */
-parameter PER_TBUF=47*US;    /* Bus free time between STOP and new START 4.7us/1.3us         */
-parameter SDA_PER=10*US;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
-                             /* SDA raise -> SDA sample. Must be < PER_TBUF! */
+parameter  US=1;                 /* How many cycles per microsecond */
+localparam PER_HI=40*US/10;      /* SCL period HI 4.0us/0.6us       */
+localparam PER_LO=47*US/10;      /* SCL period LO 4.7us/1.3us       */
+localparam PER_SU_STOP=40*US/10; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
+localparam PER_SU_DATA=3*US/10;  /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
+localparam PER_SU_RSRT=47*US/10; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
+localparam PER_HD_STRT=40*US/10; /* hold time for (RE)START: SDA fall  -> SCL fall   4.0us/0.6us */
+localparam PER_HD_DATA=0*US/10;  /* hold time for data       SCL fall  -> SDA change 0us/0us (300ns internal)  but we wait for CLKL so should be OK */
+localparam PER_TBUF=47*US/10;    /* Bus free time between STOP and new START 4.7us/1.3us         */
+localparam SDA_PER=10*US/10;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
+                                 /* SDA raise -> SDA sample. Must be < PER_TBUF! */
 
-parameter MAX_PER=PER_LO;
+/* Must be max of the above */
+localparam MAX_PER=PER_LO;
 
 /* iverilog doesn't support constant functions :-( -- use trickery... MUST use max. period */
-parameter m1  =  MAX_PER & 32'hffff0000;
-parameter m1a =  m1 ? m1 : MAX_PER;
-parameter m2  =  m1a & 32'hff00ff00;
-parameter m2a =  m2 ? m2 : m1a;
-parameter m3  =  m2a & 32'hf0f0f0f0;
-parameter m3a =  m3 ? m3 : m2a;
-parameter m4  =  m3a & 32'hcccccccc;
-parameter m4a =  m4 ? m4 : m3a;
-parameter m5  =  m4a & 32'haaaaaaaa;
+localparam m1  =  MAX_PER & 32'hffff0000;
+localparam m1a =  m1 ? m1 : MAX_PER;
+localparam m2  =  m1a & 32'hff00ff00;
+localparam m2a =  m2 ? m2 : m1a;
+localparam m3  =  m2a & 32'hf0f0f0f0;
+localparam m3a =  m3 ? m3 : m2a;
+localparam m4  =  m3a & 32'hcccccccc;
+localparam m4a =  m4 ? m4 : m3a;
+localparam m5  =  m4a & 32'haaaaaaaa;
 
-parameter PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) + 1;
+localparam PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) + 1;
+
+localparam S_SZ_INT    = `S_SZ - 1; /* separately maintained flags: bby */
 
 input  clk;
 input  sda;
@@ -65,36 +79,39 @@ output [7:0]      dat_out;
 input             ws;
 input             rst;
 
-parameter W_NONE=2'b00;
-parameter W_CLKH=2'b01;
-parameter W_CLKL=2'b10;
+localparam W_NONE=2'b00;
+localparam W_CLKH=2'b01;
+localparam W_CLKL=2'b10;
 reg [1:0]  wai;
 
-parameter ST_IDLE=3'b000;
-parameter ST_INIT=3'b001;
-parameter ST_BITR=3'b010;
-parameter ST_BITW=3'b011;
-parameter ST_STRT=3'b100;
-parameter ST_STOP=3'b101;
-parameter ST_DONE=3'b110;
-parameter ST_SCHK=3'b111;
+localparam ST_IDLE=3'b000;
+localparam ST_INIT=3'b001;
+localparam ST_BITR=3'b010;
+localparam ST_BITW=3'b011;
+localparam ST_STRT=3'b100;
+localparam ST_STOP=3'b101;
+localparam ST_DONE=3'b110;
+localparam ST_SCHK=3'b111;
 reg [2:0]  state;
+
 reg [PER_LD_SIZE-1:0] div;
 reg [PER_LD_SIZE-1:0] dely;
-reg [3:0]  i;
-reg sda_r, scl_r;
-reg [8:0]  dat_r;
-reg        started;
-reg [`S_SZ-1:0]  status;
-parameter  GST_IDLE=2'b00;
-parameter  GST_STRT=2'b01;
-parameter  GST_READ=2'b10;
-parameter  GST_WRTE=2'b11;
-reg [1:0]  gstat;
+reg [3:0]             i;
+reg                   sda_r, scl_r;
+reg [8:0]             dat_r;
+reg                   started;
+reg [S_SZ_INT-1:0]    status;
+reg                   bby;
 
-reg [`C_SZ-1:0]  cmd_r;
+localparam  GST_IDLE=2'b00;
+localparam  GST_STRT=2'b01;
+localparam  GST_READ=2'b10;
+localparam  GST_WRTE=2'b11;
+reg [1:0]             gstat;
 
-wire [`S_SZ-1:0]stat_out = status;
+reg [`C_SZ-1:0] cmd_r;
+
+wire [`S_SZ-1:0]stat_out = {bby, status};
 wire [7:0]      dat_out  = dat_r[8:1];
 wire            sda_out  = sda_r;
 wire            scl_out  = scl_r;
@@ -103,7 +120,7 @@ wire            scl_out  = scl_r;
 	begin
 		$display("Arbitration lost\n");
 		/* this clears the busy flag also */
-		status <= (`S_ERR | `S_ALO);
+		status <= (`S_ERR | `S_ALO | `S_DON);
 		/* arbitration lost */
 		/* sda_r and scl_r are both 1 at this point */
 		state <= ST_IDLE;
@@ -117,6 +134,7 @@ wire            scl_out  = scl_r;
 		end else if ( scl ) begin
 			// STOP condition detected; start dely timer
 			dely <= PER_TBUF;
+			bby  <= 0;
 		end
 	end
 
@@ -124,6 +142,19 @@ wire            scl_out  = scl_r;
 		/* dely == 1 means no further delay */
 		if ( dely > 1 )
 			dely <= dely - 1;
+	end
+
+	always @(negedge sda or posedge rst) begin
+		if ( rst ) begin
+			/* Not completely accurate. If we reset the local master then
+			 * we might miss the possibility that another master is currently
+			 * holding the bus and it is thus busy. However, this should be
+			 * caught by an 'arbitration'...
+			 */
+			bby <= 0;
+		end else if ( scl ) begin
+			bby <= 1;
+		end
 	end
 
 `ifdef TEST_WITHOUTH_DELAY_TIMER
@@ -163,7 +194,9 @@ wire            scl_out  = scl_r;
 					 || (cmd[`CB_READ] && cmd[`CB_WRTE])
 					 || ((cmd[`CB_STRT] || gstat == GST_STRT) && cmd[`CB_READ])
 				   ) begin
-					status <= `S_ERR;
+					status <= `S_ERR | `S_DON;
+				end else if ( gstat == GST_IDLE && bby ) begin
+					status <= `S_ERR | `S_BBL | `S_DON;
 				end else begin
 					status <= `S_BSY;
 					div    <= dely > PER_SU_DATA ? dely : PER_SU_DATA;
@@ -251,6 +284,7 @@ wire            scl_out  = scl_r;
 									sda_r           <= 1;
 									state           <= ST_IDLE;
 									status[`SB_BSY] <= 0;
+									status[`SB_DON] <= 1;
 									status[`SB_ACK] <= ~dat_r[0];
 									/* Start dely timer -- next time we may have to wait until
 									 * next cycle can be accepted 
@@ -334,6 +368,7 @@ wire            scl_out  = scl_r;
 										state           <= ST_IDLE;
 										gstat           <= GST_IDLE;
 										status[`SB_BSY] <= 0;
+										status[`SB_DON] <= 1;
 										status[`SB_ACK] <= ~dat_r[0];
 									end
 
