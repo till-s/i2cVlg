@@ -15,17 +15,16 @@ input     rst_in;
 
 reg       rst;
 reg [7:0] dat;
-parameter N_DAT=4;
 reg sda_r;
 reg ack;
 reg act_out;
 reg rs_out;
 reg ws_out;
 reg as_out;
-parameter ST_IDLE=3'b000;
-parameter ST_ADDR=3'b001;
-parameter ST_READ=3'b010;
-parameter ST_WRTE=3'b011;
+localparam ST_IDLE=3'b000;
+localparam ST_ADDR=3'b001;
+localparam ST_READ=3'b010;
+localparam ST_WRTE=3'b011;
 reg [2:0]  state;
 reg [3:0]  i;
 
