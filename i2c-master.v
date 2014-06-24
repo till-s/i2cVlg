@@ -26,17 +26,32 @@
 
 module i2c_master(clk, sda, sda_out, scl, scl_out, cmd, stat_out, dat, dat_out, ws, rst);
 /* Timing given for standard/fast mode */
-parameter PER_HI=40;      /* SCL period HI 4.0us/0.6us */
-parameter PER_LO=47;      /* SCL period LO 4.7us/1.3us */
-parameter PER_SU_STOP=40; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
-parameter PER_SU_DATA=3;  /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
-parameter PER_SU_RSRT=47; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
-parameter PER_HD_STRT=40; /* hold time for (RE)START: SDA fall  -> SCL fall   4.0us/0.6us */
-parameter PER_HD_DATA=0;  /* hold time for data       SCL fall  -> SDA change 0us/0us (300ns internal)  but we wait for CLKL so should be OK */
-parameter PER_TBUF=47;    /* Bus free time between STOP and new START 4.7us/1.3us         */
-parameter SDA_PER=10;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
-                          /* SDA raise -> SDA sample. Must be < PER_TBUF! */
-parameter PER_LD_SIZE=6;
+parameter US=1;              /* How many cycles per microsecond */
+parameter PER_HI=40*US;      /* SCL period HI 4.0us/0.6us       */
+parameter PER_LO=47*US;      /* SCL period LO 4.7us/1.3us       */
+parameter PER_SU_STOP=40*US; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
+parameter PER_SU_DATA=3*US;  /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
+parameter PER_SU_RSRT=47*US; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
+parameter PER_HD_STRT=40*US; /* hold time for (RE)START: SDA fall  -> SCL fall   4.0us/0.6us */
+parameter PER_HD_DATA=0*US;  /* hold time for data       SCL fall  -> SDA change 0us/0us (300ns internal)  but we wait for CLKL so should be OK */
+parameter PER_TBUF=47*US;    /* Bus free time between STOP and new START 4.7us/1.3us         */
+parameter SDA_PER=10*US;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
+                             /* SDA raise -> SDA sample. Must be < PER_TBUF! */
+
+parameter MAX_PER=PER_LO;
+
+/* iverilog doesn't support constant functions :-( -- use trickery... MUST use max. period */
+parameter m1  =  MAX_PER & 32'hffff0000;
+parameter m1a =  m1 ? m1 : MAX_PER;
+parameter m2  =  m1a & 32'hff00ff00;
+parameter m2a =  m2 ? m2 : m1a;
+parameter m3  =  m2a & 32'hf0f0f0f0;
+parameter m3a =  m3 ? m3 : m2a;
+parameter m4  =  m3a & 32'hcccccccc;
+parameter m4a =  m4 ? m4 : m3a;
+parameter m5  =  m4a & 32'haaaaaaaa;
+
+parameter PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) + 1;
 
 input  clk;
 input  sda;
