@@ -57,7 +57,7 @@ endtask
 
 	pin_drv mst_sda_drv(sda, mst_sda_out);
 	pin_drv mst_scl_drv(scl, mst_scl_out);
-    i2c_master  mst(
+    i2c_master #(.US(100))  mst(
 		.clk(clk),
 		.sda(sda),
 		.sda_out(mst_sda_out),
@@ -90,7 +90,8 @@ endtask
 		dat = 8'h5a;
 		slv_dat = 8'h55;
 		cmd = `C_STRT | `C_STOP;
-		#1 rst = 0;
+		#4 rst =0;
+		#100; /* let the thing come up */
 		sync;
 
 		cmd = `C_STRT;
