@@ -35,6 +35,57 @@
 `define C_SZ 5
 `define S_SZ 7
 
+module i2c_bby_detector(input clk, input scl, input sda, output reg bby, output reg sto, input rst);
+parameter US=1;
+localparam PER_TR = 10*US/10; /* SDA/SCL rise time (max) 1us/.3us; fall time is .3us/.3us */
+localparam MAX_PER=PER_TR;
+
+/* iverilog doesn't support constant functions :-( -- use trickery... MUST use max. period */
+localparam m1  =  MAX_PER & 32'hffff0000;
+localparam m1a =  m1 ? m1 : MAX_PER;
+localparam m2  =  m1a & 32'hff00ff00;
+localparam m2a =  m2 ? m2 : m1a;
+localparam m3  =  m2a & 32'hf0f0f0f0;
+localparam m3a =  m3 ? m3 : m2a;
+localparam m4  =  m3a & 32'hcccccccc;
+localparam m4a =  m4 ? m4 : m3a;
+localparam m5  =  m4a & 32'haaaaaaaa;
+
+localparam PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) + 1;
+
+
+reg [PER_LD_SIZE-1:0] div;
+reg sda_l;
+
+	always @(posedge clk or posedge rst) begin
+		if ( rst ) begin
+			/* Not completely accurate. If we reset the local master then
+			 * we might miss the possibility that another master is currently
+			 * holding the bus and it is thus busy. However, this should be
+			 * caught by an 'arbitration'...
+			 */
+			bby   <= 0;
+			sda_l <= sda;
+			div   <= PER_TR;
+			sto   <= 0;
+		end else begin
+			sto   <= 0;
+			if ( div > 0 ) begin
+				div <= div - 1;
+			end else begin
+				div <= PER_TR;
+				if ( sda_l != sda ) begin	
+					sda_l <= sda;
+					if ( scl ) begin
+						bby <= sda_l;
+						sto <= sda; /* raise sto for one cycle */
+					end
+				end
+			end
+		end
+	end
+endmodule
+
 module i2c_master(clk, sda, sda_out, scl, scl_out, cmd, stat_out, dat, dat_out, ws, rst);
 /* Timing given for standard/fast mode */
 parameter  US=1;                 /* How many cycles per microsecond */
@@ -46,8 +97,9 @@ localparam PER_SU_RSRT=47*US/10; /* setup time for RESTART:  SCL raise -> SDA fa
 localparam PER_HD_STRT=40*US/10; /* hold time for (RE)START: SDA fall  -> SCL fall   4.0us/0.6us */
 localparam PER_HD_DATA=0*US/10;  /* hold time for data       SCL fall  -> SDA change 0us/0us (300ns internal)  but we wait for CLKL so should be OK */
 localparam PER_TBUF=47*US/10;    /* Bus free time between STOP and new START 4.7us/1.3us         */
-localparam SDA_PER=10*US/10;     /* sampling time to confirm STOP vs lost arbitration - not in spec;
-                                 /* SDA raise -> SDA sample. Must be < PER_TBUF! */
+localparam SDA_PER=2*10*US/10;   /* sampling time to confirm STOP vs lost arbitration - not in spec;
+                                 /* SDA raise -> SDA sample. Must be < PER_TBUF! Make twice the rise time
+                                  * so that the start/stop detector can remove BBY before we declare victory! */
 
 /* Must be max of the above */
 localparam MAX_PER=PER_LO;
@@ -101,7 +153,7 @@ reg                   sda_r, scl_r;
 reg [8:0]             dat_r;
 reg                   started;
 reg [S_SZ_INT-1:0]    status;
-reg                   bby;
+wire                  bby, sto;
 
 localparam  GST_IDLE=2'b00;
 localparam  GST_STRT=2'b01;
@@ -128,36 +180,9 @@ wire            scl_out  = scl_r;
 	end
 	endtask
 
-	always @(posedge sda or posedge rst) begin
-		if ( rst ) begin
-			dely <= 1;
-		end else if ( scl ) begin
-			// STOP condition detected; start dely timer
-			dely <= PER_TBUF;
-			bby  <= 0;
-		end
-	end
+	i2c_bby_detector #(.US(US)) bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
 
-	always @(posedge clk) begin
-		/* dely == 1 means no further delay */
-		if ( dely > 1 )
-			dely <= dely - 1;
-	end
-
-	always @(negedge sda or posedge rst) begin
-		if ( rst ) begin
-			/* Not completely accurate. If we reset the local master then
-			 * we might miss the possibility that another master is currently
-			 * holding the bus and it is thus busy. However, this should be
-			 * caught by an 'arbitration'...
-			 */
-			bby <= 0;
-		end else if ( scl ) begin
-			bby <= 1;
-		end
-	end
-
-`ifdef TEST_WITHOUTH_DELAY_TIMER
+`ifdef TEST_WITHOUT_DELAY_TIMER
 	always @(dely) begin
 		dely <= 1;
 	end
@@ -172,7 +197,13 @@ wire            scl_out  = scl_r;
 			scl_r <= 1;
 			status<= `S_BSY;
 			gstat <= GST_IDLE;
-		end else if ( ! status[`SB_BSY] && ws ) begin
+			dely  <= 1;
+		end else begin
+		if ( sto )
+			dely <= PER_TBUF;
+		else if ( dely > 1 ) /* dely == 1 means no further delay */
+			dely <= dely - 1;
+		if ( ! status[`SB_BSY] && ws ) begin
 			if ( cmd == `C_CLRS ) begin
 				/* clear status */
 				status <= 0;
@@ -385,6 +416,7 @@ wire            scl_out  = scl_r;
 						end
 					end
 			endcase
+		end
 		end
 	end
 specify
