@@ -6,10 +6,13 @@ endmodule
 
 `define CHECK_TIMING
 
+`include "i2c-edge-detect.v"
 `include "i2c-master.v"
 `include "i2c-slave.v"
 
 module test;
+
+parameter US=100;
 
 	tri1 sda, scl;
 	reg  clk, rst, ws;
@@ -57,7 +60,7 @@ endtask
 
 	pin_drv mst_sda_drv(sda, mst_sda_out);
 	pin_drv mst_scl_drv(scl, mst_scl_out);
-    i2c_master #(.US(100))  mst(
+    i2c_master #(.US(US))  mst(
 		.clk(clk),
 		.sda(sda),
 		.sda_out(mst_sda_out),
@@ -91,7 +94,7 @@ endtask
 		slv_dat = 8'h55;
 		cmd = `C_STRT | `C_STOP;
 		#4 rst =0;
-		#100; /* let the thing come up */
+		#(10*US); /* let the thing come up */
 		sync;
 
 		cmd = `C_STRT;
@@ -121,7 +124,7 @@ endtask
 		sync;
 
 				
-		#200;
+		#(20*US);
 		$finish;
 	end
 endmodule
