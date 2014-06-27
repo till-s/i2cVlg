@@ -180,7 +180,7 @@ wire            scl_out  = scl_r;
 	end
 	endtask
 
-	i2c_bby_detector #(.US(US)) bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
+	i2c_bby_detect #(.US(US)) bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
 
 `ifdef TEST_WITHOUT_DELAY_TIMER
 	always @(dely) begin
