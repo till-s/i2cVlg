@@ -35,57 +35,6 @@
 `define C_SZ 5
 `define S_SZ 7
 
-module i2c_bby_detector(input clk, input scl, input sda, output reg bby, output reg sto, input rst);
-parameter US=1;
-localparam PER_TR = 10*US/10; /* SDA/SCL rise time (max) 1us/.3us; fall time is .3us/.3us */
-localparam MAX_PER=PER_TR;
-
-/* iverilog doesn't support constant functions :-( -- use trickery... MUST use max. period */
-localparam m1  =  MAX_PER & 32'hffff0000;
-localparam m1a =  m1 ? m1 : MAX_PER;
-localparam m2  =  m1a & 32'hff00ff00;
-localparam m2a =  m2 ? m2 : m1a;
-localparam m3  =  m2a & 32'hf0f0f0f0;
-localparam m3a =  m3 ? m3 : m2a;
-localparam m4  =  m3a & 32'hcccccccc;
-localparam m4a =  m4 ? m4 : m3a;
-localparam m5  =  m4a & 32'haaaaaaaa;
-
-localparam PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) + 1;
-
-
-reg [PER_LD_SIZE-1:0] div;
-reg sda_l;
-
-	always @(posedge clk or posedge rst) begin
-		if ( rst ) begin
-			/* Not completely accurate. If we reset the local master then
-			 * we might miss the possibility that another master is currently
-			 * holding the bus and it is thus busy. However, this should be
-			 * caught by an 'arbitration'...
-			 */
-			bby   <= 0;
-			sda_l <= sda;
-			div   <= PER_TR;
-			sto   <= 0;
-		end else begin
-			sto   <= 0;
-			if ( div > 0 ) begin
-				div <= div - 1;
-			end else begin
-				div <= PER_TR;
-				if ( sda_l != sda ) begin	
-					sda_l <= sda;
-					if ( scl ) begin
-						bby <= sda_l;
-						sto <= sda; /* raise sto for one cycle */
-					end
-				end
-			end
-		end
-	end
-endmodule
-
 module i2c_master(clk, sda, sda_out, scl, scl_out, cmd, stat_out, dat, dat_out, ws, rst);
 /* Timing given for standard/fast mode */
 parameter  US=1;                 /* How many cycles per microsecond */
