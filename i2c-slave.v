@@ -1,6 +1,7 @@
-module i2c_slave(clk, scl, sda, sda_out, act_out, rs_out, dat_in, ws_out, dat_out, as_out, rst_in);
+module i2c_slave(clk, scl, sda, sda_out, act_out, rs_out, dat_in, ws_out, dat_out, as_out, rst);
 
 parameter MYADDR=(7'h3b);
+parameter US=1;
 
 input clk; /* for resync if necessary */
 input scl, sda;
@@ -11,131 +12,203 @@ input  [7:0]dat_in;
 output ws_out;
 output [7:0]dat_out;
 output as_out;
-input     rst_in;
+input     rst;
 
-reg       rst;
-reg [7:0] dat;
-reg sda_r;
-reg ack;
-reg act_out;
+reg [7:0] dat, new_dat;
+reg sda_r, new_sda;
+reg ack, got_ack;
+reg act_out, new_act;
 reg rs_out;
 reg ws_out;
-reg as_out;
+reg as_out, as_gen;
+reg strobe;
 localparam ST_IDLE=3'b000;
 localparam ST_ADDR=3'b001;
 localparam ST_READ=3'b010;
 localparam ST_WRTE=3'b011;
-reg [2:0]  state;
+reg [2:0]  state, new_state;
 reg [3:0]  i;
 
 wire [7:0] dat_out = dat;
 wire       sda_out = sda_r;
 
-	// reset
-	always @(posedge rst_in) begin
-		rst <= 1;
-	end
+wire       sta, sto, scl_lohi, scl_hilo;
 
-	// detect STOP
-	always @(posedge sda) begin
-		if ( scl != 0 ) begin
-			rst <= 1;
-		end
-	end
+	i2c_bby_detect #(.US(US))  sta_sto_det(.clk(clk), .sda(sda), .scl(scl), .sto(sto), .sta(sta), .rst(rst));
 
-	// detect START
-	always @(negedge sda) begin
-		if ( scl != 0 ) begin
-			state <= ST_ADDR;	
-			i     <= 0;
-			if ( state != ST_IDLE ) begin
-				$display("Start detector: RESTART from: %x\n", state);
-			end 
-		end
-	end
+	i2c_edge_detect #(.US(US)) scl_det(.clk(clk), .lin(scl), .hilo(scl_hilo), .lohi(scl_lohi), .rst(rst));
 
-	always @(posedge scl) begin
-		if ( i >= 8 )
+	// i counter
+	always @(posedge clk or posedge rst) begin
+		if ( rst ) begin
 			i <= 0;
-		else
-			i <= i + 1;
-	end
-
-	// take away read/write strobe after one pulse 
-	always @(posedge scl) begin
-		if ( rs_out ) rs_out <= 0;
-		if ( ws_out ) ws_out <= 0;
-		if ( as_out ) as_out <= 0;
-	end
-
-	always @(scl or posedge rst) begin
-		if ( rst == 1 ) begin
-			state   <= ST_IDLE;
-			rst     <= 0;
-			sda_r   <= 1;
-			act_out <= 0;
-			rs_out  <= 0;
-			ws_out  <= 0;
 		end else begin
+			if ( sta ) begin
+				 i <= 0;
+			end else if ( scl_lohi ) begin
+				if ( i >= 8 )
+					i <= 0;
+				else
+					i <= i + 1;
+			end
+		end
+	end
+
+	/* New state computation */
+	always @(*) begin
+
+		new_state = state;
+		new_sda   = sda_r;
+		new_dat   = dat;
+		got_ack   = 1'b0;
+		strobe    = 1'b0;
+		new_act   = 1'b0;
+
+		if ( scl_hilo ) begin
 			case ( state ) 
 				ST_WRTE:
-					if ( scl == 0 ) begin
-						if ( i == 0 ) begin
-							if ( ack ) begin
-								dat   <= dat_in;
-								sda_r <= dat_in[7];
-							end
-						end else if ( i < 8 ) begin
-							sda_r <= dat[7 - i];
-						end else begin
-							sda_r <= 1;
+					if ( i == 0 ) begin
+						if ( ack ) begin
+							new_sda = dat[7];
 						end
+					end else if ( i < 8 ) begin
+						new_sda = dat[7 - i];
 					end else begin
-						if ( i == 8 ) begin
-							ack    <= !sda;	
-							rs_out <= !sda;
-						end 
+						new_sda = 1'b1;
 					end
 
 				ST_ADDR,
 				ST_READ:
-					if ( scl == 0 ) begin
-						if ( i == 0 ) begin
-							/* release SDA during ACK (and after START) */
-							sda_r <= 1;
-						end else if ( i == 8 ) begin
-							if ( state != ST_ADDR || (dat[7:1] == MYADDR) ) begin
-								sda_r <= 1'b0; /* ACK */
-								if ( state == ST_ADDR ) begin
-									if ( dat[0] ) begin
-										/* on the next rising edge of SCL: i==8 and the code above
-										 * will raise ack
-										 */
-										state <= ST_WRTE;
-									end else begin
-										state <= ST_READ;
-									end
+					if ( i == 0 ) begin
+						/* release SDA during ACK (and after START) */
+						new_sda = 1'b1;
+					end else if ( i == 8 ) begin
+						if ( state != ST_ADDR || (dat[7:1] == MYADDR) ) begin
+							new_sda = 1'b0; /* ACK */
+							if ( state == ST_ADDR ) begin
+								new_act = 1'b1;
+								if ( dat[0] ) begin
+									/* on the next rising edge of SCL: i==8 and the code below
+									 * will raise ack
+									 */
+									new_state = ST_WRTE;
+								end else begin
+									new_state = ST_READ;
 								end
-							end else begin
-								/* NO ACK */
-								state <= ST_IDLE;
 							end
-						end
-					end else begin
-						/* shift data in on positive clock edge */
-						if ( i < 8 ) begin
-							dat <= {dat[6:0], sda};
 						end else begin
-							/* raise write strobe during ACK cycle */
-							if ( state == ST_ADDR )
-								as_out <= 1;
-							else
-								ws_out <= 1;
+							/* NO ACK */
+							new_state <= ST_IDLE;
 						end
 					end
 
-				default: state = ST_IDLE;
+				default: new_state = ST_IDLE;
+			endcase
+		end else if ( scl_lohi ) begin
+//			new_sda = 1;
+			case ( state ) 
+				ST_WRTE:
+					if ( i == 8 ) begin
+						got_ack = !sda;	
+						strobe  = 1;
+					end
+
+				ST_ADDR,
+				ST_READ:
+					/* shift data in on positive clock edge */
+					if ( i < 8 ) begin
+						new_dat = {dat[6:0], sda};
+					end else begin
+						/* raise write strobe during ACK cycle */
+						strobe = 1;
+					end
+
+				default: new_state = ST_IDLE;
 			endcase
 		end
 	end
+
+	// ACK state machine
+	always @(posedge clk or posedge rst) begin
+		if ( rst )
+			ack <= 0;
+		else begin
+			if ( i == 1 || sto || sta ) 
+				/* ack remembers if the last byte was ACKed.
+				 * Once i==1 we can clear this condition
+				 */
+				ack <= 0;
+			else if ( got_ack )
+				ack <= 1'b1;
+		end
+	end
+
+	// ACT state machine
+	always @(posedge clk or posedge rst) begin
+		if ( rst )
+			act_out <= 0;
+		else begin
+			if ( sto )
+				act_out <= 0;
+			if ( new_act )
+				act_out <= 1;
+		end
+	end
+
+
+	// dat + sda update
+	always @(posedge clk or posedge rst) begin
+		if ( rst ) begin
+			sda_r <= 1'b1;
+		end else begin
+			/* clock in on the cycle following read strobe */
+			dat   <= rs_out ? dat_in : new_dat;
+			sda_r <= new_sda;
+		end
+	end
+
+	// state machine
+	always @(posedge clk or posedge rst) begin
+		if ( rst ) begin
+			state <= ST_IDLE;
+		end else begin
+			if ( sta ) begin
+				state <= ST_ADDR;
+				if ( state != ST_IDLE ) begin
+					$display("Start detector: RESTART from: %x\n", state);
+				end 
+			end else if ( sto ) begin
+				state <= ST_IDLE;
+			end else begin
+				state <= new_state;
+			end
+		end
+	end
+
+	// strobes
+	always @(posedge clk or posedge rst) begin
+		if ( rst ) begin
+			rs_out <= 0;
+			ws_out <= 0;
+			as_out <= 0;
+			as_gen <= 0;
+		end else begin
+			rs_out <= 0;
+			ws_out <= 0;
+			as_out <= 0;
+			if ( got_ack )
+				rs_out <= 1;
+			if ( new_act )
+				as_gen <= 1;
+			if ( strobe ) begin
+				if ( as_gen ) begin
+					as_out <= 1;
+					as_gen <= 0;
+				end else if ( state == ST_READ ) begin
+					ws_out <= 1;
+				end
+			end
+		end
+	end
+
 endmodule
