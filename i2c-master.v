@@ -68,6 +68,7 @@ reg                   sda_r, scl_r, scl, sda;
 reg [8:0]             dat_r;
 reg                   started;
 reg [S_SZ_INT-1:0]    status;
+reg                   lra;  // last read acked
 wire                  bby, sto;
 
 localparam  GST_IDLE=2'b00;
@@ -94,6 +95,7 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 		/* sda_r and scl_r are both 1 at this point */
 		state <= ST_IDLE;
 		gstat <= GST_IDLE;
+		lra   <= 0;
 	end
 	endtask
 	
@@ -124,6 +126,7 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 			status<= `S_BSY;
 			gstat <= GST_IDLE;
 			dely  <= 1;
+			lra   <= 0;
 		end else begin
 		if ( sto )
 			dely <= PER_TBUF;
@@ -142,6 +145,7 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 					- cannot READ while WRITing and vice versa -- unless restart
 					- cannot READ and WRITE simultaneously
 					- cannot READ just after START (must address)
+					- cannot STOP if there was a preceding ack'ed READ
 				 */
 				if ( ( ! cmd[`CB_STRT] && (
 						gstat == GST_IDLE
@@ -154,13 +158,21 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 					status <= `S_ERR | `S_DON;
 				end else if ( gstat == GST_IDLE && bby ) begin
 					status <= `S_ERR | `S_BBL | `S_DON;
+				end else if (    cmd[`CB_STOP]
+				              && (    ( cmd[`CB_READ] && ~ cmd[`CB_NACK] )
+                                   || ( lra && ! (cmd[`CB_READ] && cmd[`CB_NACK]) )
+                                 )
+				            ) begin
+					status <= `S_ERR | `S_LRA | `S_DON;
 				end else begin
 					status <= `S_BSY;
 					div    <= dely > PER_SU_DATA ? dely : PER_SU_DATA;
+					lra    <= 0;
 					if ( cmd[`CB_WRTE] ) begin
 						dat_r  <= {dat, 1'b1};
 						state  <= ST_BITW;
 					end else if ( cmd[`CB_READ] ) begin
+						lra    <= !cmd[`CB_NACK];
 						dat_r  <= { 8'hff, cmd[`CB_NACK] };
 						state  <= ST_BITR;
 					end
