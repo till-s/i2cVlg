@@ -14,6 +14,8 @@ endmodule
 
 `define NELM 8
 
+`define NOERR (`S_DON)
+
 module test;
 
 parameter US=10;
@@ -24,6 +26,7 @@ parameter US=10;
 	wire [7:0] mst_dat_out;
 	reg  [`C_SZ-1:0] cmd;
 	wire [`S_SZ-1:0] status;
+	wire [`D_SZ-1:0] i2cm_debug;
 
 	reg  [7:0] slv_dat;
 
@@ -43,14 +46,16 @@ parameter US=10;
 
 	integer i;
 
-task sync;
+task sync(input [`S_SZ-1:0] exp);
 	begin
 		#2 ws = 1;
 		#2 ws = 0;
 		if ( ! status[`SB_ERR] ) begin
-			@(negedge status[`SB_BSY]);
+			@(posedge status[`SB_DON]);
 		end
 		if ( status[`SB_ERR] ) begin
+			if ( status != exp )
+				$display("Error status 0x%x (unexpected -- expected: 0x%x)\n", status, exp);
 			cmd = `C_CLRS;
 			#2 ws = 1;
 			#2 ws = 0;
@@ -93,14 +98,10 @@ endtask
 		.iic_ups_3_scl_t( tst_scl_t )
 	);
 
-/*
-	pin_drv slv_sda_drv(sda, slv_sda_out);
-*/
-
 	i2c_slave #(.US(US)) slv(
 		.clk(clk),
-		.scl(slv_scl_in),
-		.sda(slv_sda_in),
+		.scl_in(slv_scl_in),
+		.sda_in(slv_sda_in),
 		.sda_out(slv_sda_out),
 		//.act_out(),
 		.rs_out(slv_rs),
@@ -123,22 +124,20 @@ endtask
 
 	defparam ram.slv.MYADDR=7'h3a;
 
-/*
-	pin_drv mst_sda_drv(sda, mst_sda_out);
-	pin_drv mst_scl_drv(scl, mst_scl_out);
-*/
     i2c_master #(.US(US))  mst(
 		.clk(clk),
-		.sda(mst_sda_in),
+		.sda_in(mst_sda_in),
 		.sda_out(mst_sda_out),
-		.scl(mst_scl_in),
+		.scl_in(mst_scl_in),
 		.scl_out(mst_scl_out),
 		.cmd(cmd),
 		.stat_out(status),
 		.dat(dat),
 		.dat_out(mst_dat_out),
 		.ws(ws),
-		.rst(rst));
+		.rst(rst),
+		.debug(i2cm_debug)
+	);
 
 	// CLOCK
 	always #1 clk=~clk;
@@ -168,61 +167,66 @@ endtask
 		#2 ws = 0;
 
 		cmd = `C_STRT | `C_STOP;
-		sync;
+		sync(`NOERR);
 
 		cmd = `C_STRT;
-		sync;
+		sync(`NOERR);
 
 		dat = (7'h3b << 1) | 1'b1;
 		cmd = `C_STRT | `C_WRTE;
-		sync;
+		sync(`NOERR);
 
 		cmd = `C_READ;
-		sync;
+		sync(`NOERR);
 
 		cmd = `C_READ | `C_NACK;
-		sync;
+		sync(`NOERR);
 
 		cmd = `C_WRTE;
-		sync;
+		sync(`S_ERR | `S_DON | `S_BBY );
 
 		cmd = `C_STOP;
-		sync;
+		sync(`NOERR);
 
 		dat = (7'h3b << 1) | 1'b0;
 		cmd = `C_STRT | `C_WRTE;
-		sync;
+		sync(`NOERR);
 
 		cmd = `C_WRTE | `C_STOP;
-		sync;
+		sync(`NOERR);
 
 		cmd = `C_STRT | `C_WRTE;
 		dat = {7'h3a, 1'b0};
-		sync;
+		sync(`NOERR);
+
 		cmd = `C_WRTE;
 		dat = 0; // write index
-		sync;
+		sync(`NOERR);
 		for ( i=0; i<`NELM; i=i+1 ) begin
 			dat = dat+8'h11;
-			sync;
+			sync(`NOERR);
 		end
 
 		cmd = `C_STRT | `C_WRTE;
 		dat = {7'h3a, 1'b1};
-		sync;
+		sync(`NOERR);
 
 		cmd = `C_READ;
 		for ( i=0; i<`NELM; i=i+1 ) begin
 			if ( i == `NELM - 1 )
-				cmd = cmd | `C_NACK;
-			sync;
+				cmd = cmd /*| `C_NACK*/;
+			sync(`NOERR);
 			if ( mst_dat_out != 8'h11*(i+1) ) begin
 				$display("Readback mismatch: got %x expected %x\n", mst_dat_out, 8'h11*(i+1));
 			end
 		end
 
 		cmd = `C_STOP;
-		sync;
+		sync(`S_ERR | `S_DON | `S_BBY | `S_LRA );
+
+		/* read one w/o ack */
+		cmd = `C_STOP | `C_READ | `C_NACK;
+		sync(`NOERR);
 
 				
 		#(20*US);
