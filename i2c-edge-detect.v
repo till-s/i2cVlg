@@ -27,7 +27,8 @@ localparam PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) +
 reg [PER_LD_SIZE-1:0] div;
 reg lin_l;
 
-	always @(posedge clk or posedge rst) begin
+    // NOTE: xilinx infers some gated clock if 'lin' is not registered
+	always @(posedge clk /* or posedge rst */) begin
 		if ( rst ) begin
 			hilo  <= 0;
 			lohi  <= 0;
@@ -36,6 +37,7 @@ reg lin_l;
 		end else begin
 			hilo  <= 0;
 			lohi  <= 0;
+			lin_l <= lin_l;
 			if ( div > 0 ) begin
 				div <= div - 1;
 			end else begin 
