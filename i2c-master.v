@@ -44,6 +44,7 @@ input  [7:0]      dat;
 output [7:0]      dat_out;
 input             ws;
 input             rst;
+output [`D_SZ-1:0]debug;
 
 localparam W_NONE=2'b00;
 localparam W_CLKH=2'b01;
@@ -81,6 +82,8 @@ wire [`S_SZ-1:0]stat_out = {bby, status};
 wire [7:0]      dat_out  = dat_r[8:1];
 wire            sda_out  = sda_r;
 wire            scl_out  = scl_r;
+
+wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, state};
 
 	task arbitration_lost;
 	begin
