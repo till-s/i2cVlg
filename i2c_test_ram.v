@@ -46,8 +46,8 @@ reg as_seen;
     
     i2c_slave #(.US(US)) slv(
         .clk(clk),
-        .scl(scl_i),
-        .sda(sda_i),
+        .scl_in(scl_i),
+        .sda_in(sda_i),
         .sda_out(sda_t),
         .rs_out(rs),
         .ws_out(ws),

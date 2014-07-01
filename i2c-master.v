@@ -69,9 +69,9 @@ localparam PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) +
 localparam S_SZ_INT    = `S_SZ - 1; /* separately maintained flags: bby */
 
 input  clk;
-input  sda;
+input  sda_in;
 output sda_out;
-input  scl;
+input  scl_in;
 output scl_out;
 input  [`C_SZ-1:0]cmd;
 output [`S_SZ-1:0]stat_out;
@@ -98,7 +98,7 @@ reg [2:0]  state;
 reg [PER_LD_SIZE-1:0] div;
 reg [PER_LD_SIZE-1:0] dely;
 reg [3:0]             i;
-reg                   sda_r, scl_r;
+reg                   sda_r, scl_r, scl, sda;
 reg [8:0]             dat_r;
 reg                   started;
 reg [S_SZ_INT-1:0]    status;
@@ -128,6 +128,15 @@ wire            scl_out  = scl_r;
 		gstat <= GST_IDLE;
 	end
 	endtask
+	
+	// registered scl/sda
+	always @(posedge clk) begin
+	   sda <= sda_in;
+	end
+	
+	always @(posedge clk) begin
+	   scl <= scl_in;
+	end
 
 	i2c_bby_detect #(.US(US)) bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
 

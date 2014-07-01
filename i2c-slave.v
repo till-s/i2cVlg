@@ -1,10 +1,10 @@
-module i2c_slave(clk, scl, sda, sda_out, act_out, rs_out, dat_in, ws_out, dat_out, as_out, rst);
+module i2c_slave(clk, scl_in, sda_in, sda_out, act_out, rs_out, dat_in, ws_out, dat_out, as_out, rst);
 
 parameter MYADDR=(7'h3b);
 parameter US=1;
 
 input clk; /* for resync if necessary */
-input scl, sda;
+input scl_in, sda_in;
 output sda_out;
 output act_out;
 output rs_out;
@@ -15,7 +15,7 @@ output as_out;
 input     rst;
 
 reg [7:0] dat, new_dat;
-reg sda_r, new_sda;
+reg sda_r, new_sda, sda, scl;
 reg ack, got_ack;
 reg act_out, new_act;
 reg rs_out;
@@ -33,6 +33,14 @@ wire [7:0] dat_out = dat;
 wire       sda_out = sda_r;
 
 wire       sta, sto, scl_lohi, scl_hilo;
+
+	always @(posedge clk) begin
+		sda <= sda_in;
+	end
+
+	always @(posedge clk) begin
+		scl <= scl_in;
+	end
 
 	i2c_bby_detect #(.US(US))  sta_sto_det(.clk(clk), .sda(sda), .scl(scl), .sto(sto), .sta(sta), .rst(rst));
 
