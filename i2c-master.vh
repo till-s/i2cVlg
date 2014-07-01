@@ -19,7 +19,7 @@
 /* C_CLRS clear latched status */ 
 `define C_CLRS   0
 
-`define S_SZ 7
+`define S_SZ 8
 
 /* Status bit positions        */
 `define SB_DON 0
@@ -27,8 +27,9 @@
 `define SB_ALO 2
 `define SB_BBL 3
 `define SB_ACK 4
-`define SB_BSY 5
-`define SB_BBY 6  
+`define SB_LRA 5
+`define SB_BSY 6
+`define SB_BBY 7  
 
 /* Status bits                 */
 `define S_DON (1<<`SB_DON)     /* Command done                                        */
@@ -36,6 +37,7 @@
 `define S_ALO (1<<`SB_ALO)     /* Arbitration lost (in addition to ERR)               */
 `define S_BBL (1<<`SB_BBL)     /* Bus busy (latched); ERR if bus owned by other master*/
 `define S_ACK (1<<`SB_ACK)     /* Received ACK (after WRTE)                           */
+`define S_LRA (1<<`SB_LRA)     /* Sent ACK after last READ -- must not STOP           */
 `define S_BSY (1<<`SB_BSY)     /* Controller busy (not latched)                       */
 `define S_BBY (1<<`SB_BBY)     /* Bus busy (not latched)                              */
 
