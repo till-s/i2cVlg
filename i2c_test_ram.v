@@ -37,6 +37,7 @@ wire rs,ws;
 reg [7:0] mem [ (1<<LD_NBYTES) - 1 : 0 ];
 
 wire [7:0] dat_out;
+wire       as;
 
 reg [LD_NBYTES-1:0] idx;
 reg as_seen;
