@@ -5,9 +5,8 @@
  */
 module i2c_edge_detect(input clk, input lin, output reg hilo, output reg lohi, input rst);
 
-parameter  US=1;
-localparam PER_TR = 10*US/10; /* SDA/SCL rise time (max)  1us/.3us */
-localparam PER_TF =  3*US/10; /* SDA/SCL fall time (max) .3us/.3us */
+`include "i2c-timing-params.vh"
+
 localparam MAX_PER=PER_TR;
 
 /* iverilog doesn't support constant functions :-( -- use trickery... MUST use max. period */
@@ -55,7 +54,7 @@ reg lin_l;
 endmodule
 
 module i2c_bby_detect(input clk, input sda, input scl, output sto, output sta, output reg bby, input rst);
-parameter US = 1;
+`include "i2c-timing-params.vh"
 
 wire sda_hilo, sda_lohi;
 
@@ -76,5 +75,5 @@ wire sda_hilo, sda_lohi;
 		end
 	end
 	
-	i2c_edge_detect #(.US(US)) sda_det(.clk(clk), .lin(sda), .hilo(sda_hilo), .lohi(sda_lohi), .rst(rst) );
+	i2c_edge_detect #(.US(US),.I2C_MODE(I2C_MODE)) sda_det(.clk(clk), .lin(sda), .hilo(sda_hilo), .lohi(sda_lohi), .rst(rst) );
 endmodule
