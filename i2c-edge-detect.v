@@ -7,8 +7,8 @@ module i2c_edge_detect(input clk, input lin, output reg hilo, output reg lohi, i
 
 `include "i2c-timing-params.vh"
 
-/* signal must be stable for rise-/fall-time divided by TRF_SCALE_G */
-parameter integer TRF_SCALE_G = 2;
+/* signal must be stable for rise-/fall-time divided by TRF_SCALE */
+parameter integer TRF_SCALE = 2;
 
 /* signal must be stable for 1/2 rise-/fall-time */
 function integer perClip(integer val, integer scl);
@@ -17,8 +17,8 @@ begin
   if ( perClip < 0 ) perClip = 0;
 end endfunction
 
-localparam integer STABLE_RISING  = perClip(PER_TR,TRF_SCALE_G);
-localparam integer STABLE_FALLING = perClip(PER_TF,TRF_SCALE_G);
+localparam integer STABLE_RISING  = perClip(PER_TR,TRF_SCALE);
+localparam integer STABLE_FALLING = perClip(PER_TF,TRF_SCALE);
 
 localparam MAX_PER = STABLE_RISING > STABLE_FALLING ? STABLE_RISING : STABLE_FALLING;
 
@@ -68,6 +68,9 @@ endmodule
 module i2c_bby_detect(input clk, input sda, input scl, output sto, output sta, output reg bby, input rst);
 `include "i2c-timing-params.vh"
 
+/* signal must be stable for rise-/fall-time divided by TRF_SCALE */
+parameter integer TRF_SCALE = 2;
+
 wire sda_hilo, sda_lohi;
 
 	assign sto = sda_lohi && scl;
@@ -87,5 +90,5 @@ wire sda_hilo, sda_lohi;
 		end
 	end
 	
-	i2c_edge_detect #(.US(US),.I2C_MODE(I2C_MODE)) sda_det(.clk(clk), .lin(sda), .hilo(sda_hilo), .lohi(sda_lohi), .rst(rst) );
+	i2c_edge_detect #(.US(US),.I2C_MODE(I2C_MODE),.TRF_SCALE(TRF_SCALE)) sda_det(.clk(clk), .lin(sda), .hilo(sda_hilo), .lohi(sda_lohi), .rst(rst) );
 endmodule
