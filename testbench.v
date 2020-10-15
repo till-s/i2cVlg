@@ -49,10 +49,10 @@ parameter I2C_MODE=2;
 
 task wstrob;
 	begin
+		ws <= 1;
 		@(posedge clk);
-		ws = 1;
+		ws <= 0;
 		@(posedge clk);
-		ws = 0;
 	end
 endtask
 
