@@ -237,7 +237,7 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 								if ( cmd_r[`CB_STOP] ) begin
 									sda_r <= 0;
 									state <= ST_STOP;
-									div   <= PER_LO;
+									div   <= PER_LO; /* SCL already low; no need to add fall-time */
 								end else begin
 									sda_r           <= 1;
 									state           <= ST_IDLE;
@@ -247,7 +247,7 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 									/* Start dely timer -- next time we may have to wait until
 									 * next cycle can be accepted 
 									 */
-									dely            <= PER_LO;
+									dely            <= PER_LO; /* SCL already low; no need to add fall-time */
 								end
 							end
 
@@ -275,7 +275,7 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 										end else begin
 											scl_r <= 0;
 											wai   <= W_CLKL;
-											div   <= PER_LO;
+											div   <= PER_LO + PER_TF;
 											if ( cmd_r[`CB_WRTE] )
 												state <= ST_BITW;
 											else if ( cmd_r[`CB_READ] )
@@ -290,10 +290,10 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 								begin
 									if ( scl_r ) begin
 										wai   <= W_CLKL;
-										div   <= PER_LO;
+										div   <= PER_LO + PER_TF;
 									end else begin
 										wai   <= W_CLKH;
-										div   <= PER_HI;
+										div   <= PER_HI + PER_TR;
 									end
 									scl_r <= ~scl_r;
 								end
