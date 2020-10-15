@@ -69,19 +69,19 @@ endtask
 		.iic_bus_scl_t( buf_scl_out ),
 
 		.iic_ups_1_sda_i( slv_sda_in ),
-		.iic_ups_1_sda_o( 0 ),
+		.iic_ups_1_sda_o( 1'b0 ),
 		.iic_ups_1_sda_t( slv_sda_out ),
 
 		.iic_ups_1_scl_i( slv_scl_in ),
-		.iic_ups_1_scl_o( 0 ),
+		.iic_ups_1_scl_o( 1'b0 ),
 		.iic_ups_1_scl_t( slv_scl_out ),
 
 		.iic_ups_2_sda_i( mst_sda_in ),
-		.iic_ups_2_sda_o( 0 ),
+		.iic_ups_2_sda_o( 1'b0 ),
 		.iic_ups_2_sda_t( mst_sda_out ),
 
 		.iic_ups_2_scl_i( mst_scl_in ),
-		.iic_ups_2_scl_o( 0 ),
+		.iic_ups_2_scl_o( 1'b0 ),
 		.iic_ups_2_scl_t( mst_scl_out ),
 
 		.iic_ups_3_sda_i( tst_sda_in ),
