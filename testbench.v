@@ -16,7 +16,8 @@ endmodule
 
 module test;
 
-parameter US=10;
+parameter US=100;
+parameter I2C_MODE=2;
 
 	tri1 sda, scl;
 	reg  clk, rst, ws;
@@ -43,17 +44,26 @@ parameter US=10;
 
 	integer i;
 
+task wstrob;
+	begin
+		@(posedge clk);
+		ws = 1;
+		@(posedge clk);
+		ws = 0;
+	end
+endtask
+
 task sync;
 	begin
-		#2 ws = 1;
-		#2 ws = 0;
+		wstrob;
 		if ( ! status[`SB_ERR] ) begin
-			@(negedge status[`SB_BSY]);
+			while ( status[`SB_BSY] ) begin
+				@(posedge clk);
+			end
 		end
 		if ( status[`SB_ERR] ) begin
 			cmd = `C_CLRS;
-			#2 ws = 1;
-			#2 ws = 0;
+			wstrob;
 		end
 	end
 endtask
@@ -97,7 +107,7 @@ endtask
 	pin_drv slv_sda_drv(sda, slv_sda_out);
 */
 
-	i2c_slave #(.US(US)) slv(
+	i2c_slave #(.US(US),.I2C_MODE(I2C_MODE)) slv(
 		.clk(clk),
 		.scl(slv_scl_in),
 		.sda(slv_sda_in),
@@ -110,7 +120,7 @@ endtask
 		.rst(rst)
 	);
 
-	i2c_test_ram #(.US(US)) ram(
+	i2c_test_ram #(.US(US),.I2C_MODE(I2C_MODE)) ram(
 		.clk( clk ),
 		.aresetn( !rst ),
 		.scl_i( tst_scl_in ),
@@ -127,7 +137,7 @@ endtask
 	pin_drv mst_sda_drv(sda, mst_sda_out);
 	pin_drv mst_scl_drv(scl, mst_scl_out);
 */
-    i2c_master #(.US(US))  mst(
+    i2c_master #(.US(US), .I2C_MODE(I2C_MODE))  mst(
 		.clk(clk),
 		.sda(mst_sda_in),
 		.sda_out(mst_sda_out),
@@ -145,8 +155,12 @@ endtask
 
 	// Read slave
 	always @(posedge clk) begin
-		if ( slv_ws )
+		if ( slv_ws ) begin
+			if ( slv_dat_out != 8'haa) begin
+				$display("SLV write mismatch, got %02x ,expected %02x", slv_dat_out, 8'haa);
+			end
 			slv_dat <= slv_dat_out;
+		end
 	end
 
 	always @(posedge clk) begin
@@ -161,11 +175,13 @@ endtask
 		rst = 1;
 		dat = 8'h5a;
 		slv_dat = 8'h55;
-		#4 rst =0;
+		for ( i=0; i<10; i+=1 )
+			@(posedge clk);
+		rst =0;
 		#(10*US); /* let the thing come up */
+		@(posedge clk);
 		cmd = 0;
-		   ws = 1;
-		#2 ws = 0;
+		wstrob;
 
 		cmd = `C_STRT | `C_STOP;
 		sync;
@@ -180,8 +196,16 @@ endtask
 		cmd = `C_READ;
 		sync;
 
+		if ( mst_dat_out != 8'h55 ) begin
+			$display("SLV readback mismatch; got 0x%02x, exp 0x%02x", mst_dat_out, 8'h55);
+		end
+
 		cmd = `C_READ | `C_NACK;
 		sync;
+
+		if ( mst_dat_out != 8'h56 ) begin
+			$display("SLV readback mismatch; got 0x%02x, exp 0x%02x", mst_dat_out, 8'h56);
+		end
 
 		cmd = `C_WRTE;
 		sync;
@@ -193,6 +217,7 @@ endtask
 		cmd = `C_STRT | `C_WRTE;
 		sync;
 
+        dat = 8'haa;
 		cmd = `C_WRTE | `C_STOP;
 		sync;
 

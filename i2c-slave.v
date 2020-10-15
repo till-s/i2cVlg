@@ -1,7 +1,8 @@
 module i2c_slave(clk, scl, sda, sda_out, act_out, rs_out, dat_in, ws_out, dat_out, as_out, rst);
 
 parameter MYADDR=(7'h3b);
-parameter US=1;
+
+`include "i2c-timing-params.vh"
 
 input clk; /* for resync if necessary */
 input scl, sda;
@@ -34,9 +35,9 @@ wire       sda_out = sda_r;
 
 wire       sta, sto, scl_lohi, scl_hilo;
 
-	i2c_bby_detect #(.US(US))  sta_sto_det(.clk(clk), .sda(sda), .scl(scl), .sto(sto), .sta(sta), .rst(rst));
+	i2c_bby_detect #(.US(US),.I2C_MODE(I2C_MODE))  sta_sto_det(.clk(clk), .sda(sda), .scl(scl), .sto(sto), .sta(sta), .rst(rst));
 
-	i2c_edge_detect #(.US(US)) scl_det(.clk(clk), .lin(scl), .hilo(scl_hilo), .lohi(scl_lohi), .rst(rst));
+	i2c_edge_detect #(.US(US),.I2C_MODE(I2C_MODE)) scl_det(.clk(clk), .lin(scl), .hilo(scl_hilo), .lohi(scl_lohi), .rst(rst));
 
 	// i counter
 	always @(posedge clk or posedge rst) begin

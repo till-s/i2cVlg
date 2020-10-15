@@ -36,21 +36,9 @@
 `define S_SZ 7
 
 module i2c_master(clk, sda, sda_out, scl, scl_out, cmd, stat_out, dat, dat_out, ws, rst);
-/* Timing given for standard/fast mode */
-parameter  US=1;                 /* How many cycles per microsecond */
-localparam PER_HI=40*US/10;      /* SCL period HI 4.0us/0.6us       */
-localparam PER_LO=47*US/10;      /* SCL period LO 4.7us/1.3us       */
-localparam PER_SU_STOP=40*US/10; /* setup time for STOP:     SCL raise -> SDA raise 4.0us/0.6us */
-localparam PER_SU_DATA=3*US/10;  /* setup time for SDA:      SDA valid -> SCL raise .24us/0.1us */
-localparam PER_SU_RSRT=47*US/10; /* setup time for RESTART:  SCL raise -> SDA fall  4.7us/0.6us (? -- shouldn't it be 1.3) */
-localparam PER_HD_STRT=40*US/10; /* hold time for (RE)START: SDA fall  -> SCL fall   4.0us/0.6us */
-localparam PER_HD_DATA=0*US/10;  /* hold time for data       SCL fall  -> SDA change 0us/0us (300ns internal)  but we wait for CLKL so should be OK */
-localparam PER_TBUF=47*US/10;    /* Bus free time between STOP and new START 4.7us/1.3us         */
-localparam SDA_PER=2*10*US/10;   /* sampling time to confirm STOP vs lost arbitration - not in spec;
-                                  * SDA raise -> SDA sample. Must be < PER_TBUF! Make twice the rise time
-                                  * so that the start/stop detector can remove BBY before we declare victory! */
+`include "i2c-timing-params.vh"
 
-/* Must be max of the above */
+/* Must be max of the paramters declared in the header */
 localparam MAX_PER=PER_LO;
 
 /* iverilog doesn't support constant functions :-( -- use trickery... MUST use max. period */
@@ -129,7 +117,7 @@ wire            scl_out  = scl_r;
 	end
 	endtask
 
-	i2c_bby_detect #(.US(US)) bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
+	i2c_bby_detect #(.US(US), .I2C_MODE(I2C_MODE)) bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
 
 `ifdef TEST_WITHOUT_DELAY_TIMER
 	always @(dely) begin

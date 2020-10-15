@@ -29,6 +29,7 @@ module i2c_test_ram(
     output scl_t
     );
 parameter US        = 100;
+parameter I2C_MODE  = 0;
 parameter LD_NBYTES = 3;
 
 wire rs,ws;
@@ -44,7 +45,7 @@ reg as_seen;
     assign scl_o = 0;
     assign scl_t = 1;
     
-    i2c_slave #(.US(US)) slv(
+    i2c_slave #(.US(US),.I2C_MODE(I2C_MODE)) slv(
         .clk(clk),
         .scl(scl_i),
         .sda(sda_i),
