@@ -4,6 +4,7 @@
 	(
 		// Users to add parameters here
         parameter integer FCLK_MHZ              = 100,
+		parameter integer I2C_MODE              = 0,
 		// User parameters ends
 		// Do not modify the parameters beyond this line
 
@@ -14,10 +15,12 @@
 	)
 	(
 		// Users to add ports here
-		input  wire SDA,
-		output wire SDA_OUT,
-		input  wire SCL,
-		output wire SCL_OUT,
+		input  wire SDA_I,
+		output wire SDA_T,
+		output wire SDA_O,
+		input  wire SCL_I,
+		output wire SCL_O,
+		output wire SCL_T,
 		output wire IRQ,
 		output wire BBY,
 
@@ -379,7 +382,7 @@
                                       i2cm_data
                                      };
 	        2'h1   : reg_data_out <= { slv_reg1[31], 7'h00,
-	                                  6'h00, SCL, SDA,
+	                                  6'h00, SCL_I, SDA_I,
 	                                  i2cm_debug
 	                                 };
 	        2'h2   : reg_data_out <= slv_reg2;
@@ -420,13 +423,16 @@
 	           
 	wire [`D_SZ-1:0] i2cm_debug;
 
+	assign SDA_O = 1'b0;
+	assign SCL_O = 1'b0;
+
 	// Add user logic here
-	i2c_master #(.US(FCLK_MHZ)) master (
+	i2c_master #(.US(FCLK_MHZ), .I2C_MODE(I2C_MODE)) master (
 	   .clk(S_AXI_ACLK),
-	   .sda_in(SDA),
-	   .sda_out(SDA_OUT),
-	   .scl_in(SCL),
-	   .scl_out(SCL_OUT),
+	   .sda_in(SDA_I),
+	   .sda_out(SDA_T),
+	   .scl_in(SCL_I),
+	   .scl_out(SCL_T),
 	   .cmd( S_AXI_WDATA[ 8+:`C_SZ] ),
 	   .stat_out(i2cm_status),
 	   .dat( S_AXI_WDATA[7:0]  ),
