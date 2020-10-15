@@ -7,6 +7,9 @@ module i2c_edge_detect(input clk, input lin, output reg hilo, output reg lohi, i
 
 `include "i2c-timing-params.vh"
 
+/* signal must be stable for rise-/fall-time divided by TRF_SCALE_G */
+parameter integer TRF_SCALE_G = 2;
+
 /* signal must be stable for 1/2 rise-/fall-time */
 function integer perClip(integer val, integer scl);
 begin
@@ -14,8 +17,8 @@ begin
   if ( perClip < 0 ) perClip = 0;
 end endfunction
 
-localparam integer STABLE_RISING  = perClip(PER_TR,2);
-localparam integer STABLE_FALLING = perClip(PER_TF,2);
+localparam integer STABLE_RISING  = perClip(PER_TR,TRF_SCALE_G);
+localparam integer STABLE_FALLING = perClip(PER_TF,TRF_SCALE_G);
 
 localparam MAX_PER = STABLE_RISING > STABLE_FALLING ? STABLE_RISING : STABLE_FALLING;
 
