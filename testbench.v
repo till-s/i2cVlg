@@ -184,8 +184,9 @@ endtask
 		rst = 1;
 		dat = 8'h5a;
 		slv_dat = 8'h55;
-		for ( i=0; i<10; i+=1 )
+		for ( i=0; i<10; i=i+1 ) begin
 			@(posedge clk);
+		end
 		rst =0;
 		#(10*US); /* let the thing come up */
 		@(posedge clk);
