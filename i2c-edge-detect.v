@@ -7,7 +7,17 @@ module i2c_edge_detect(input clk, input lin, output reg hilo, output reg lohi, i
 
 `include "i2c-timing-params.vh"
 
-localparam MAX_PER=PER_TR;
+/* signal must be stable for 1/2 rise-/fall-time */
+function integer perClip(integer val, integer scl);
+begin
+  perClip = val/scl - 1;
+  if ( perClip < 0 ) perClip = 0;
+end endfunction
+
+localparam integer STABLE_RISING  = perClip(PER_TR,2);
+localparam integer STABLE_FALLING = perClip(PER_TF,2);
+
+localparam MAX_PER = STABLE_RISING > STABLE_FALLING ? STABLE_RISING : STABLE_FALLING;
 
 /* iverilog doesn't support constant functions :-( -- use trickery... MUST use max. period */
 localparam m1  =  MAX_PER & 32'hffff0000;
@@ -22,34 +32,31 @@ localparam m5  =  m4a & 32'haaaaaaaa;
 
 localparam PER_LD_SIZE = (m1?16:0) + (m2?8:0) + (m3?4:0) + (m4?2:0) + (m5?1:0) + 1;
 
+reg [PER_LD_SIZE-1:0] div = STABLE_FALLING;
+reg lin_l = 1'b1;
 
-reg [PER_LD_SIZE-1:0] div;
-reg lin_l;
-
-    // NOTE: xilinx infers some gated clock if 'lin' is not registered
-	always @(posedge clk /* or posedge rst */) begin
+	always @(posedge clk) begin
 		if ( rst ) begin
 			hilo  <= 0;
 			lohi  <= 0;
 			lin_l <= lin;
-			div   <= 0; //PER_TR;
+			div   <= lin ? STABLE_FALLING : STABLE_RISING;
 		end else begin
 			hilo  <= 0;
 			lohi  <= 0;
 			lin_l <= lin_l;
-			if ( div > 0 ) begin
-				div <= div - 1;
+            if ( lin != lin_l ) begin
+	 			if ( div > 0 ) begin
+					div   <= div - 1;
+				end else begin
+					lin_l <= lin;
+					case ( {lin_l, lin} )
+						2'b01       : begin hilo <= 0; lohi <= 1; end
+						2'b10       : begin hilo <= 1; lohi <= 0; end
+					endcase
+				end
 			end else begin 
-/*
-				div <= lin ? (PER_TF > 0 ? PER_TF - 1 : 0) :
-                             (PER_TR > 0 ? PER_TR - 1 : 0) 
-				       ;
-*/
-				case ( {lin_l, lin} )
-					2'b01       : begin hilo <= 0; lohi <= 1; end
-					2'b10       : begin hilo <= 1; lohi <= 0; end
-				endcase
-				lin_l <= lin;
+				div <= lin_l ? STABLE_FALLING : STABLE_RISING;
 			end
 		end
 	end
