@@ -16,7 +16,8 @@ output as_out;
 input     rst;
 
 reg [7:0] dat, new_dat;
-reg sda_r, new_sda, sda, scl;
+reg sda_r, new_sda;
+wire sda, scl;
 reg ack, got_ack;
 reg act_out, new_act;
 reg rs_out;
@@ -35,13 +36,7 @@ wire       sda_out = sda_r;
 
 wire       sta, sto, scl_lohi, scl_hilo;
 
-	always @(posedge clk) begin
-		sda <= sda_in;
-	end
-
-	always @(posedge clk) begin
-		scl <= scl_in;
-	end
+	i2c_sync U_i2c_sync(.clk(clk), .rst(rst), .scl_i(scl_in), .sda_i(sda_in), .scl_o(scl), .sda_o(sda));
 
 	i2c_bby_detect #(.US(US),.I2C_MODE(I2C_MODE))  sta_sto_det(.clk(clk), .sda(sda), .scl(scl), .sto(sto), .sta(sta), .rst(rst));
 

@@ -53,7 +53,8 @@ reg [2:0]  state;
 reg [PER_LD_SIZE-1:0] div;
 reg [PER_LD_SIZE-1:0] dely;
 reg [3:0]             i;
-reg                   sda_r, scl_r, scl, sda;
+reg                   sda_r, scl_r;
+wire                  scl, sda;
 reg [8:0]             dat_r;
 reg                   started;
 reg [S_SZ_INT-1:0]    status;
@@ -89,15 +90,9 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 	endtask
 	
 	// registered scl/sda
-	always @(posedge clk) begin
-	   sda <= sda_in;
-	end
+	i2c_sync U_sync(.clk(clk), .rst(rst), .scl_i(scl_in), .sda_i(sda_in), .scl_o(scl), .sda_o(sda));
 	
-	always @(posedge clk) begin
-	   scl <= scl_in;
-	end
-
-	i2c_bby_detect #(.US(US), .I2C_MODE(I2C_MODE)) bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
+	i2c_bby_detect #(.US(US), .I2C_MODE(I2C_MODE)) U_bby_det(.clk(clk), .scl(scl), .sda(sda), .bby(bby), .sto(sto), .rst(rst));
 
 `ifdef TEST_WITHOUT_DELAY_TIMER
 	always @(dely) begin

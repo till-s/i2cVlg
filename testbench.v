@@ -7,6 +7,7 @@ endmodule
 `define CHECK_TIMING
 
 `include "i2c-edge-detect.v"
+`include "i2c-sync.v"
 `include "i2c-master.v"
 `include "i2c-slave.v"
 `include "i2c_test_ram.v"

@@ -32,7 +32,7 @@ reg lin_l;
 			hilo  <= 0;
 			lohi  <= 0;
 			lin_l <= lin;
-			div   <= PER_TR;
+			div   <= 0; //PER_TR;
 		end else begin
 			hilo  <= 0;
 			lohi  <= 0;
@@ -40,9 +40,11 @@ reg lin_l;
 			if ( div > 0 ) begin
 				div <= div - 1;
 			end else begin 
+/*
 				div <= lin ? (PER_TF > 0 ? PER_TF - 1 : 0) :
                              (PER_TR > 0 ? PER_TR - 1 : 0) 
 				       ;
+*/
 				case ( {lin_l, lin} )
 					2'b01       : begin hilo <= 0; lohi <= 1; end
 					2'b10       : begin hilo <= 1; lohi <= 0; end
