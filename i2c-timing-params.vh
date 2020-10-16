@@ -1,5 +1,11 @@
-parameter  US=1;        /* How many cycles per microsecond  */
-parameter  I2C_MODE=1;  /* 0 -> STD (100kHz), 1 -> FM (400kHz), 2 -> FM+ (1MHz) */
+`ifndef DEFAULT_US
+`define DEFAULT_US 1
+`endif
+`ifndef DEFAULT_I2C_MODE
+`define DEFAULT_I2C_MODE 0
+`endif
+parameter  US=`DEFAULT_US;              /* How many cycles per microsecond  */
+parameter  I2C_MODE=`DEFAULT_I2C_MODE;  /* 0 -> STD (100kHz), 1 -> FM (400kHz), 2 -> FM+ (1MHz) */
 `define PW 32
 `define PRANGE 3*`PW-1:0
 `define PSEL(arr) ((arr[`PW*(2-I2C_MODE+1)-1:`PW*(2-I2C_MODE)]*US)/NS)
