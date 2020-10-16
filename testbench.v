@@ -1,7 +1,10 @@
 module pin_drv(pin, o);
+parameter  integer RISE_DELAY = 1;
+parameter  integer FALL_DELAY = 0;
+localparam integer HI_Z_DELAY = RISE_DELAY;
 	inout pin;
 	input  o;
-	bufif0 #(1,0,1)(pin, 0, o);
+	bufif0 #(RISE_DELAY,FALL_DELAY,HI_Z_DELAY)(pin, 0, o);
 endmodule
 
 `define CHECK_TIMING
@@ -19,11 +22,21 @@ endmodule
 
 module test;
 
-parameter US=100;
-parameter I2C_MODE=2;
+`define DEFAULT_US       100
+`define DEFAULT_I2C_MODE 2
+`include "i2c-timing-params.vh"
+
+localparam HALF_PER       = 1;
+
+localparam SCL_STRETCH    = 4*PER_LO;
+
+localparam SCL_RISE_DELAY = (PER_TR + SCL_STRETCH)*2*HALF_PER;
+localparam SCL_FALL_DELAY = PER_TF*2*HALF_PER;
+localparam SDA_RISE_DELAY = PER_TR*2*HALF_PER;
+localparam SDA_FALL_DELAY = PER_TF*2*HALF_PER;
 
 	tri1 sda, scl;
-	reg  clk, rst, ws;
+	reg  clk = 1'b0, rst = 1'b1, ws = 1'b0;
 	reg  [7:0] dat;
 	wire [7:0] mst_dat_out;
 	reg  [`C_SZ-1:0] cmd;
@@ -76,8 +89,8 @@ task sync(input [`S_SZ-1:0] exp);
 	end
 endtask
 
-	pin_drv   sda_drv(.pin(sda), .o(buf_sda_out) );
-	pin_drv   scl_drv(.pin(scl), .o(buf_scl_out) );
+	pin_drv #(.RISE_DELAY(SDA_RISE_DELAY), .FALL_DELAY(SDA_FALL_DELAY)) sda_drv(.pin(sda), .o(buf_sda_out) );
+	pin_drv #(.RISE_DELAY(SCL_RISE_DELAY), .FALL_DELAY(SCL_FALL_DELAY)) scl_drv(.pin(scl), .o(buf_scl_out) );
 
 	i2c_chain c1(
 		.iic_bus_sda_i( sda ),
@@ -161,7 +174,7 @@ endtask
 	);
 
 	// CLOCK
-	always #1 clk=~clk;
+	always #HALF_PER clk=~clk;
 
 	// Read slave
 	always @(posedge clk) begin
@@ -181,10 +194,12 @@ endtask
 	initial
 	begin
 		$dumpvars;
-		clk = 0;
-		rst = 1;
 		dat = 8'h5a;
 		slv_dat = 8'h55;
+		/* wait for buffers to settle */
+		while ( sda !== 1'b1 || scl !== 1'b1 ) begin
+			@(posedge clk);
+		end
 		for ( i=0; i<10; i=i+1 ) begin
 			@(posedge clk);
 		end
