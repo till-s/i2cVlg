@@ -191,6 +191,10 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 			end
 		end else begin
 
+			if ( div > 1 ) begin
+				div <= div - 1; /* count down even while waiting for CLKH/CLKL */
+			end
+
 			case ( wai )
 				W_CLKH:
 					if ( scl == 1 ) begin
@@ -251,9 +255,8 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 					end
 
 				default:
-					if ( div > 0 ) begin
-						div <= div - 1;
 						if ( div == 1 ) begin
+							div <= div - 1;
 							case ( state )
 								ST_STRT:
 								begin
@@ -336,7 +339,6 @@ wire [`D_SZ-1:0]debug    = {2'b0, scl_r, sda_r, 2'b0, gstat, 2'b0, wai, 1'b0, st
 									;
 							endcase
 						end
-					end
 			endcase
 		end
 		end
